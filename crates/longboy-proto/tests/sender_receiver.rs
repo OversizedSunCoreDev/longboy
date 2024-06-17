@@ -8,6 +8,8 @@ use longboy_proto::{Receiver, Sender, Sink, Source};
 struct TestSource
 {
     counter: Arc<AtomicU64>,
+    accumulator: u64,
+    period: u64,
 }
 
 struct TestSink
@@ -19,9 +21,17 @@ impl Source for TestSource
 {
     fn poll(&mut self, buffer: &mut [u8]) -> bool
     {
-        let counter = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
-        *buffer.first_chunk_mut().unwrap() = u64::to_le_bytes(counter);
-        true
+        self.accumulator += 1;
+        match self.accumulator % self.period == 0
+        {
+            true =>
+            {
+                let counter = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
+                *buffer.first_chunk_mut().unwrap() = u64::to_le_bytes(counter);
+                true
+            }
+            false => false,
+        }
     }
 }
 
@@ -37,19 +47,29 @@ impl Sink for TestSink
 #[test]
 fn golden()
 {
+    let size = 8;
+    let window_size = 3;
+    let key = 0xDEADBEEFDEADBEEF;
+
     let source_counter = Arc::new(AtomicU64::new(0));
     let sink_counter = Arc::new(AtomicU64::new(0));
 
+    let timestamp = 0;
+
     let mut sender = Sender::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSource {
             counter: source_counter.clone(),
+            accumulator: 0,
+            period: 1,
         }),
     );
     let mut receiver = Receiver::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSink {
             counter: sink_counter.clone(),
         }),
@@ -58,79 +78,73 @@ fn golden()
     assert_eq!(sender.cycle(), 0);
     assert_eq!(receiver.cycle(), 0);
 
-    // 1
-    let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram_1: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 1);
     assert_eq!(receiver.cycle(), 0);
     assert_eq!(source_counter.load(Ordering::Relaxed), 1);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 0);
 
-    receiver.handle_datagram(&datagram);
+    receiver.handle_datagram(timestamp, &mut datagram_1);
     assert_eq!(sender.cycle(), 1);
     assert_eq!(receiver.cycle(), 1);
     assert_eq!(source_counter.load(Ordering::Relaxed), 1);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 1);
 
-    // 2
-    let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram_2: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 2);
     assert_eq!(receiver.cycle(), 1);
     assert_eq!(source_counter.load(Ordering::Relaxed), 2);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 1);
 
-    receiver.handle_datagram(&datagram);
+    receiver.handle_datagram(timestamp, &mut datagram_2);
     assert_eq!(sender.cycle(), 2);
     assert_eq!(receiver.cycle(), 2);
     assert_eq!(source_counter.load(Ordering::Relaxed), 2);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 2);
 
-    // 3
-    let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram_3: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 2);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 2);
 
-    receiver.handle_datagram(&datagram);
+    receiver.handle_datagram(timestamp, &mut datagram_3);
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 3);
 
-    // 4
-    let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram_4: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 4);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 4);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 3);
 
-    receiver.handle_datagram(&datagram);
+    receiver.handle_datagram(timestamp, &mut datagram_4);
     assert_eq!(sender.cycle(), 4);
     assert_eq!(receiver.cycle(), 4);
     assert_eq!(source_counter.load(Ordering::Relaxed), 4);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 4);
 
-    // 5
-    let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram_5: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 5);
     assert_eq!(receiver.cycle(), 4);
     assert_eq!(source_counter.load(Ordering::Relaxed), 5);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 4);
 
-    receiver.handle_datagram(&datagram);
+    receiver.handle_datagram(timestamp, &mut datagram_5);
     assert_eq!(sender.cycle(), 5);
     assert_eq!(receiver.cycle(), 5);
     assert_eq!(source_counter.load(Ordering::Relaxed), 5);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 5);
 
-    // 6
-    let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram_6: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 6);
     assert_eq!(receiver.cycle(), 5);
     assert_eq!(source_counter.load(Ordering::Relaxed), 6);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 5);
 
-    receiver.handle_datagram(&datagram);
+    receiver.handle_datagram(timestamp, &mut datagram_6);
     assert_eq!(sender.cycle(), 6);
     assert_eq!(receiver.cycle(), 6);
     assert_eq!(source_counter.load(Ordering::Relaxed), 6);
@@ -140,19 +154,29 @@ fn golden()
 #[test]
 fn mirroring()
 {
+    let size = 8;
+    let window_size = 3;
+    let key = 0xDEADBEEFDEADBEEF;
+
     let source_counter = Arc::new(AtomicU64::new(0));
     let sink_counter = Arc::new(AtomicU64::new(0));
 
+    let timestamp = 0;
+
     let mut sender = Sender::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSource {
             counter: source_counter.clone(),
+            accumulator: 0,
+            period: 1,
         }),
     );
     let mut receiver = Receiver::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSink {
             counter: sink_counter.clone(),
         }),
@@ -161,33 +185,33 @@ fn mirroring()
     assert_eq!(sender.cycle(), 0);
     assert_eq!(receiver.cycle(), 0);
 
-    let datagram_1: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_2: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_3: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram_1: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_2: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_3: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 0);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 0);
 
-    receiver.handle_datagram(&datagram_1);
-    receiver.handle_datagram(&datagram_1);
-    receiver.handle_datagram(&datagram_1);
+    receiver.handle_datagram(timestamp, &mut datagram_1.clone());
+    receiver.handle_datagram(timestamp, &mut datagram_1.clone());
+    receiver.handle_datagram(timestamp, &mut datagram_1);
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 1);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 1);
 
-    receiver.handle_datagram(&datagram_2);
-    receiver.handle_datagram(&datagram_2);
-    receiver.handle_datagram(&datagram_2);
+    receiver.handle_datagram(timestamp, &mut datagram_2.clone());
+    receiver.handle_datagram(timestamp, &mut datagram_2.clone());
+    receiver.handle_datagram(timestamp, &mut datagram_2);
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 2);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 2);
 
-    receiver.handle_datagram(&datagram_3);
-    receiver.handle_datagram(&datagram_3);
-    receiver.handle_datagram(&datagram_3);
+    receiver.handle_datagram(timestamp, &mut datagram_3.clone());
+    receiver.handle_datagram(timestamp, &mut datagram_3.clone());
+    receiver.handle_datagram(timestamp, &mut datagram_3);
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
@@ -197,19 +221,29 @@ fn mirroring()
 #[test]
 fn out_of_order()
 {
+    let size = 8;
+    let window_size = 3;
+    let key = 0xDEADBEEFDEADBEEF;
+
     let source_counter = Arc::new(AtomicU64::new(0));
     let sink_counter = Arc::new(AtomicU64::new(0));
 
+    let timestamp = 0;
+
     let mut sender = Sender::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSource {
             counter: source_counter.clone(),
+            accumulator: 0,
+            period: 1,
         }),
     );
     let mut receiver = Receiver::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSink {
             counter: sink_counter.clone(),
         }),
@@ -219,85 +253,85 @@ fn out_of_order()
     assert_eq!(receiver.cycle(), 0);
 
     // Inside of window.
-    let datagram_1: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_2: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_3: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram_1: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_2: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_3: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 0);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 0);
 
-    receiver.handle_datagram(&datagram_3);
+    receiver.handle_datagram(timestamp, &mut datagram_3);
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 3);
 
-    receiver.handle_datagram(&datagram_2);
+    receiver.handle_datagram(timestamp, &mut datagram_2);
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 3);
 
-    receiver.handle_datagram(&datagram_1);
+    receiver.handle_datagram(timestamp, &mut datagram_1);
     assert_eq!(sender.cycle(), 3);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 3);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 3);
 
     // Outside of window.
-    let datagram_4: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_5: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_6: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_7: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_8: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_9: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_10: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-    let datagram_11: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram_4: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_5: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_6: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_7: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_8: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_9: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_10: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+    let mut datagram_11: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
 
-    receiver.handle_datagram(&datagram_11);
+    receiver.handle_datagram(timestamp, &mut datagram_11);
     assert_eq!(sender.cycle(), 11);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 11);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 11);
 
-    receiver.handle_datagram(&datagram_10);
+    receiver.handle_datagram(timestamp, &mut datagram_10);
     assert_eq!(sender.cycle(), 11);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 11);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 11);
 
-    receiver.handle_datagram(&datagram_9);
+    receiver.handle_datagram(timestamp, &mut datagram_9);
     assert_eq!(sender.cycle(), 11);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 11);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 11);
 
-    receiver.handle_datagram(&datagram_8);
+    receiver.handle_datagram(timestamp, &mut datagram_8);
     assert_eq!(sender.cycle(), 11);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 11);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 11);
 
-    receiver.handle_datagram(&datagram_7);
+    receiver.handle_datagram(timestamp, &mut datagram_7);
     assert_eq!(sender.cycle(), 11);
     assert_eq!(receiver.cycle(), 3);
     assert_eq!(source_counter.load(Ordering::Relaxed), 11);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 11);
 
-    receiver.handle_datagram(&datagram_6);
+    receiver.handle_datagram(timestamp, &mut datagram_6);
     assert_eq!(sender.cycle(), 11);
     assert_eq!(receiver.cycle(), 11);
     assert_eq!(source_counter.load(Ordering::Relaxed), 11);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 11);
 
-    receiver.handle_datagram(&datagram_5);
+    receiver.handle_datagram(timestamp, &mut datagram_5);
     assert_eq!(sender.cycle(), 11);
     assert_eq!(receiver.cycle(), 11);
     assert_eq!(source_counter.load(Ordering::Relaxed), 11);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 11);
 
-    receiver.handle_datagram(&datagram_4);
+    receiver.handle_datagram(timestamp, &mut datagram_4);
     assert_eq!(sender.cycle(), 11);
     assert_eq!(receiver.cycle(), 11);
     assert_eq!(source_counter.load(Ordering::Relaxed), 11);
@@ -307,19 +341,29 @@ fn out_of_order()
 #[test]
 fn lost_in_transmission()
 {
+    let size = 8;
+    let window_size = 3;
+    let key = 0xDEADBEEFDEADBEEF;
+
     let source_counter = Arc::new(AtomicU64::new(0));
     let sink_counter = Arc::new(AtomicU64::new(0));
 
+    let timestamp = 0;
+
     let mut sender = Sender::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSource {
             counter: source_counter.clone(),
+            accumulator: 0,
+            period: 1,
         }),
     );
     let mut receiver = Receiver::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSink {
             counter: sink_counter.clone(),
         }),
@@ -330,20 +374,20 @@ fn lost_in_transmission()
 
     for _ in 0..128
     {
-        sender.poll_datagram().unwrap();
+        sender.poll_datagram(timestamp).unwrap();
     }
     assert_eq!(sender.cycle(), 128);
     assert_eq!(receiver.cycle(), 0);
     assert_eq!(source_counter.load(Ordering::Relaxed), 128);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 0);
 
-    let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 129);
     assert_eq!(receiver.cycle(), 0);
     assert_eq!(source_counter.load(Ordering::Relaxed), 129);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 0);
 
-    receiver.handle_datagram(&datagram);
+    receiver.handle_datagram(timestamp, &mut datagram);
     assert_eq!(sender.cycle(), 129);
     assert_eq!(receiver.cycle(), 121);
     assert_eq!(source_counter.load(Ordering::Relaxed), 129);
@@ -353,19 +397,29 @@ fn lost_in_transmission()
 #[test]
 fn cycle_wrapping()
 {
+    let size = 8;
+    let window_size = 3;
+    let key = 0xDEADBEEFDEADBEEF;
+
     let source_counter = Arc::new(AtomicU64::new(0));
     let sink_counter = Arc::new(AtomicU64::new(0));
 
+    let timestamp = 0;
+
     let mut sender = Sender::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSource {
             counter: source_counter.clone(),
+            accumulator: 0,
+            period: 1,
         }),
     );
     let mut receiver = Receiver::new(
-        8,
-        3,
+        size,
+        window_size,
+        key,
         Box::new(TestSink {
             counter: sink_counter.clone(),
         }),
@@ -376,36 +430,122 @@ fn cycle_wrapping()
 
     for _ in 0..(65535 - 1)
     {
-        let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
-        receiver.handle_datagram(&datagram);
-        println!("{}", receiver.cycle());
+        let mut datagram: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+        receiver.handle_datagram(timestamp, &mut datagram);
     }
     assert_eq!(sender.cycle(), 65534);
     assert_eq!(receiver.cycle(), 65534);
     assert_eq!(source_counter.load(Ordering::Relaxed), 65534);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 65534);
 
-    let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 0);
     assert_eq!(receiver.cycle(), 65534);
     assert_eq!(source_counter.load(Ordering::Relaxed), 65535);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 65534);
 
-    receiver.handle_datagram(&datagram);
+    receiver.handle_datagram(timestamp, &mut datagram);
     assert_eq!(sender.cycle(), 0);
     assert_eq!(receiver.cycle(), 0);
     assert_eq!(source_counter.load(Ordering::Relaxed), 65535);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 65535);
 
-    let datagram: Box<[u8]> = Box::from(sender.poll_datagram().unwrap());
+    let mut datagram: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
     assert_eq!(sender.cycle(), 1);
     assert_eq!(receiver.cycle(), 0);
     assert_eq!(source_counter.load(Ordering::Relaxed), 65536);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 65535);
 
-    receiver.handle_datagram(&datagram);
+    receiver.handle_datagram(timestamp, &mut datagram);
     assert_eq!(sender.cycle(), 1);
     assert_eq!(receiver.cycle(), 1);
     assert_eq!(source_counter.load(Ordering::Relaxed), 65536);
     assert_eq!(sink_counter.load(Ordering::Relaxed), 65536);
+}
+
+#[test]
+fn sparse()
+{
+    let size = 8;
+    let window_size = 3;
+    let key = 0xDEADBEEFDEADBEEF;
+
+    let source_counter = Arc::new(AtomicU64::new(0));
+    let sink_counter = Arc::new(AtomicU64::new(0));
+
+    let period = 300;
+
+    let timestamp = 0;
+
+    let mut sender = Sender::new(
+        size,
+        window_size,
+        key,
+        Box::new(TestSource {
+            counter: source_counter.clone(),
+            accumulator: 0,
+            period: period,
+        }),
+    );
+    let mut receiver = Receiver::new(
+        size,
+        window_size,
+        key,
+        Box::new(TestSink {
+            counter: sink_counter.clone(),
+        }),
+    );
+
+    assert_eq!(sender.cycle(), 0);
+    assert_eq!(receiver.cycle(), 0);
+
+    let mut accumulator = 0;
+
+    while accumulator < (period - 1)
+    {
+        accumulator += 1;
+
+        let datagram = sender.poll_datagram(timestamp);
+        assert!(datagram.is_none());
+        assert_eq!(sender.cycle(), 0);
+        assert_eq!(receiver.cycle(), 0);
+        assert_eq!(source_counter.load(Ordering::Relaxed), 0);
+        assert_eq!(sink_counter.load(Ordering::Relaxed), 0);
+    }
+
+    for i in 0..window_size
+    {
+        accumulator += 1;
+
+        let mut datagram: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+        receiver.handle_datagram(timestamp, &mut datagram);
+        assert_eq!(sender.cycle(), 1 + i);
+        assert_eq!(receiver.cycle(), 1 + i);
+        assert_eq!(source_counter.load(Ordering::Relaxed), 1);
+        assert_eq!(sink_counter.load(Ordering::Relaxed), 1);
+    }
+
+    while accumulator < ((period * 2) - 1)
+    {
+        accumulator += 1;
+
+        let datagram = sender.poll_datagram(timestamp);
+        assert!(datagram.is_none());
+        assert_eq!(sender.cycle(), window_size);
+        assert_eq!(receiver.cycle(), window_size);
+        assert_eq!(source_counter.load(Ordering::Relaxed), 1);
+        assert_eq!(sink_counter.load(Ordering::Relaxed), 1);
+    }
+
+    for i in 0..window_size
+    {
+        accumulator += 1;
+
+        let mut datagram: Box<[u8]> = Box::from(sender.poll_datagram(timestamp).unwrap());
+        receiver.handle_datagram(timestamp, &mut datagram);
+        assert_eq!(source_counter.load(Ordering::Relaxed), 2);
+        assert_eq!(sink_counter.load(Ordering::Relaxed), 2);
+        assert_eq!(sender.cycle(), window_size + 1 + i);
+        assert_eq!(receiver.cycle(), window_size + 1 + i);
+    }
 }

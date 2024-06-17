@@ -1,28 +1,30 @@
-use crate::Source;
+use crate::{Cipher, Source};
 
 pub struct Sender
 {
     size: usize,
     window_size: usize,
+    cipher: Cipher,
     max_cycle: usize,
 
     cycle: usize,
     flags: Box<[bool]>, // window_size
-    buffer: Box<[u8]>,  // cycle + (size * flags.len())
+    buffer: Box<[u8]>,  // cycle + timestamp + (size * flags.len())
 
     source: Box<dyn Source>,
 }
 
 impl Sender
 {
-    pub fn new(size: usize, window_size: usize, source: Box<dyn Source>) -> Self
+    pub fn new(size: usize, window_size: usize, key: u64, source: Box<dyn Source>) -> Self
     {
         let flags_size = window_size as usize;
-        let buffer_size = std::mem::size_of::<u16>() + ((size as usize) * flags_size);
+        let buffer_size = (std::mem::size_of::<u16>() * 2) + ((size as usize) * flags_size);
 
         Self {
             size: size,
             window_size: window_size,
+            cipher: Cipher::new(key),
             max_cycle: ((u16::MAX as usize) / window_size) * window_size,
 
             cycle: 0,
@@ -38,20 +40,32 @@ impl Sender
         self.cycle
     }
 
-    pub fn poll_datagram(&mut self) -> Option<&[u8]>
+    pub fn poll_datagram(&mut self, timestamp: u16) -> Option<&[u8]>
     {
-        // Record cycle.
-        *self.buffer.first_chunk_mut().unwrap() = self.cycle.to_le_bytes();
+        // Record cycle and timestamp.
+        self.buffer.as_chunks_mut().0[0] = (self.cycle as u16).to_le_bytes();
+        self.buffer.as_chunks_mut().0[1] = timestamp.to_le_bytes();
+        self.cipher.encrypt_header(&mut self.buffer[0..4]);
 
         // Poll source.
         let index = self.cycle % self.window_size;
-        let start = std::mem::size_of::<u16>() + (self.size * index);
+        let start = (std::mem::size_of::<u16>() * 2) + (self.size * index);
         let end = start + self.size;
-        self.flags[index] = self.source.poll(&mut self.buffer[start..end]);
-        if !self.flags[index]
+        match self.source.poll(&mut self.buffer[start..end])
         {
-            self.buffer[start..end].fill(0);
+            true =>
+            {
+                self.cipher.encrypt_slot(&mut self.buffer[start..end]);
+                self.flags[index] = true;
+            }
+            false =>
+            {
+                self.buffer[start..end].fill(0);
+                self.flags[index] = false;
+            }
         }
+        if !self.flags[index]
+        {}
 
         // Check for transmit and potentially advance cycle.
         match self.flags.iter().any(|flag| *flag)

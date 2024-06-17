@@ -1,6 +1,5 @@
-// #![feature(fn_traits)]
 #![feature(new_uninit)]
-// #![feature(unboxed_closures)]
+#![feature(slice_as_chunks)]
 
 // API
 mod sender;
@@ -16,3 +15,5 @@ mod receiver;
 pub use self::receiver::*;
 
 // Internal
+mod cipher;
+pub(crate) use self::cipher::*;

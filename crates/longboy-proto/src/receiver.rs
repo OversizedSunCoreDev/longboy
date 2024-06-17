@@ -1,9 +1,10 @@
-use crate::Sink;
+use crate::{Cipher, Sink};
 
 pub struct Receiver
 {
     size: usize,
     window_size: usize,
+    cipher: Cipher,
     max_cycle: usize,
 
     cycle: usize,
@@ -14,13 +15,14 @@ pub struct Receiver
 
 impl Receiver
 {
-    pub fn new(size: usize, window_size: usize, sink: Box<dyn Sink>) -> Self
+    pub fn new(size: usize, window_size: usize, key: u64, sink: Box<dyn Sink>) -> Self
     {
         let flags_size = std::cmp::max(8, 2 * window_size);
 
         Self {
             size: size,
             window_size: window_size,
+            cipher: Cipher::new(key),
             max_cycle: ((u16::MAX as usize) / window_size) * window_size,
 
             cycle: 0,
@@ -35,41 +37,48 @@ impl Receiver
         self.cycle
     }
 
-    pub fn handle_datagram(&mut self, datagram: &[u8])
+    pub fn handle_datagram(&mut self, timestamp: u16, datagram: &mut [u8])
     {
-        // Grab cycle.
-        let cycle = u16::from_le_bytes(*datagram.first_chunk().unwrap()) as usize;
+        // Grab cycle and timestamp.
+        self.cipher.decrypt_header(&mut datagram[0..4]);
+        let datagram_cycle = u16::from_le_bytes(datagram.as_chunks().0[0]) as usize;
+        let datagram_timestamp = u16::from_le_bytes(datagram.as_chunks().0[1]);
 
-        // Check for lost cycles.  This computes the distance between packet cycle and local
-        // cycle accounting for wrapping and we assume that a sufficiently large distance
-        // means behind as opposed to way ahead.
-        let mut cycle_offset = ((cycle + self.max_cycle) - self.cycle) % self.max_cycle;
-        if cycle_offset > 1024
+        // Calculate diff for cycle and timestamp.
+        let cycle_diff = ((datagram_cycle + self.max_cycle) - self.cycle) % self.max_cycle;
+        let timestamp_diff = ((datagram_timestamp + u16::MAX) - timestamp) % u16::MAX;
+
+        // Check for bad datagrams or late datagrams that are already processed.  Because
+        // we ensure only a positive diff, this is done by checking for any values greater
+        // that a certain threshold.
+        if cycle_diff > 256 || timestamp_diff > 2048
         {
-            // Already received.
+            // Bad datagram or already received.
             return;
         }
-        if cycle_offset > std::cmp::min(8, self.window_size + 1)
+
+        // Check for late or missing packets from between local cycle and the datagram
+        // cycle just received.
+        if cycle_diff > std::cmp::min(8, self.window_size + 1)
         {
             // soft warning
         }
-        if cycle_offset > self.flags.len()
+        if cycle_diff > self.flags.len()
         {
             // hard warning
 
-            while cycle_offset > self.flags.len()
+            for _ in 0..(cycle_diff - self.flags.len())
             {
                 let index = self.cycle % self.flags.len();
                 self.flags[index] = false;
                 self.cycle = (self.cycle + 1) % self.max_cycle;
-                cycle_offset -= 1;
             }
         }
 
         // Sink input.
         for i in 0..self.window_size
         {
-            let cycle_i = ((cycle + self.max_cycle) - i) % self.max_cycle;
+            let cycle_i = ((datagram_cycle + self.max_cycle) - i) % self.max_cycle;
 
             // If we're before local cycle, early out.  This is effectively checking for distance
             // being out of the buffer's size, which is only possible if before because we've
@@ -84,8 +93,9 @@ impl Receiver
 
             if !self.flags[destination_index]
             {
-                let start = std::mem::size_of::<u16>() + (self.size * source_index);
+                let start = (std::mem::size_of::<u16>() * 2) + (self.size * source_index);
                 let end = start + self.size;
+                self.cipher.decrypt_slot(&mut datagram[start..end]);
                 self.sink.handle(&datagram[start..end]);
                 self.flags[destination_index] = true;
             }
