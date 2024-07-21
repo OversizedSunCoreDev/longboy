@@ -30,9 +30,6 @@ pub use self::schema::*;
 mod server;
 pub use self::server::*;
 
-mod session;
-pub use self::session::*;
-
 // Internal
 mod udp_socket_ext;
 pub(crate) use self::udp_socket_ext::*;

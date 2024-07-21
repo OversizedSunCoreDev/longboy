@@ -5,20 +5,20 @@ use enum_map::{enum_map, EnumMap};
 use fnv::FnvHashSet;
 
 use crate::{
-    ClientToServerSchema, ClientToServerSender, Constants, Mirroring, Runtime, RuntimeTask, ServerToClientReceiver,
-    ServerToClientSchema, Session, Sink, Source,
+    ClientSession, ClientToServerSchema, ClientToServerSender, Constants, Mirroring, Runtime, RuntimeTask,
+    ServerToClientReceiver, ServerToClientSchema, Sink, Source,
 };
 
 pub struct Client
 {
+    session: ClientSession,
     runtime: Box<dyn Runtime>,
-    session: Box<dyn Session>,
 }
 
 pub struct ClientBuilder
 {
+    session: ClientSession,
     runtime: Box<dyn Runtime>,
-    session: Box<dyn Session>,
 
     ports: FnvHashSet<u16>,
     tasks: Vec<Box<dyn RuntimeTask>>,
@@ -26,11 +26,11 @@ pub struct ClientBuilder
 
 impl Client
 {
-    pub fn builder(runtime: Box<dyn Runtime>, session: Box<dyn Session>) -> ClientBuilder
+    pub fn builder(session: ClientSession, runtime: Box<dyn Runtime>) -> ClientBuilder
     {
         ClientBuilder {
-            runtime: runtime,
             session: session,
+            runtime: runtime,
 
             ports: FnvHashSet::default(),
             tasks: Vec::new(),
@@ -147,8 +147,8 @@ impl ClientBuilder
         }
 
         Client {
-            session: self.session,
             runtime: self.runtime,
+            session: self.session,
         }
     }
 }

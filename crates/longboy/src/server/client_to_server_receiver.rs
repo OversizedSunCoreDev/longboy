@@ -6,7 +6,7 @@ use flume::Receiver as FlumeReceiver;
 use fnv::FnvHashMap;
 use thunderdome::{Arena, Index};
 
-use crate::{Constants, Factory, Mirroring, Receiver, RuntimeTask, SessionEvent, Sink};
+use crate::{Constants, Factory, Mirroring, Receiver, RuntimeTask, ServerSessionEvent, Sink};
 
 pub(crate) struct ClientToServerReceiver<SinkFactoryType, const SIZE: usize, const WINDOW_SIZE: usize>
 where
@@ -20,7 +20,7 @@ where
 
     socket: UdpSocket,
 
-    session_receiver: FlumeReceiver<SessionEvent>,
+    session_receiver: FlumeReceiver<ServerSessionEvent>,
     sessions: Arena<ReceiverSession<SinkFactoryType::Type, SIZE, WINDOW_SIZE>>,
     session_id_to_session_map: FnvHashMap<u64, Index>,
     socket_addr_to_session_map: FnvHashMap<SocketAddr, Index>,
@@ -49,7 +49,7 @@ where
         mapper_socket: UdpSocket,
         socket: UdpSocket,
         session_capacity: usize,
-        session_receiver: FlumeReceiver<SessionEvent>,
+        session_receiver: FlumeReceiver<ServerSessionEvent>,
         sink_factory: SinkFactoryType,
     ) -> Result<Self>
     {
@@ -99,7 +99,7 @@ where
         {
             match event
             {
-                SessionEvent::Connected { session_id, cipher_key } =>
+                ServerSessionEvent::Connected { session_id, cipher_key } =>
                 {
                     let index = self.sessions.insert(ReceiverSession {
                         socket_addrs: EnumMap::default(),
@@ -109,7 +109,7 @@ where
                         .try_insert(session_id, index)
                         .expect("Duplicate Session ID");
                 }
-                SessionEvent::Disconnected { session_id } =>
+                ServerSessionEvent::Disconnected { session_id } =>
                 {
                     let index = self
                         .session_id_to_session_map

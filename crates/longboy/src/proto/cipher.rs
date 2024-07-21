@@ -1,7 +1,7 @@
 use cipher::{
     array::Array,
     typenum::{U20, U8},
-    BlockCipherDecrypt, BlockCipherEncrypt,
+    BlockCipherDecrypt, BlockCipherEncrypt, KeyInit,
 };
 use rc5::RC5;
 

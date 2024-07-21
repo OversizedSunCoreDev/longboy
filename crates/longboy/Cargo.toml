@@ -13,10 +13,11 @@ path = "tests/lib.rs"
 
 [dependencies]
 anyhow = "1.0.86"
-cipher = "=0.5.0-pre.4"
+cipher = "=0.5.0-pre.7"
 enum-map = "2.7.3"
 flume = "0.11.0"
 fnv = "1.0.7"
+quinn = "0.11.2"
 rc5 = { git = "https://github.com/RustCrypto/block-ciphers.git" }
 thunderdome = "0.6.1"
 tokio = { version = "1.38.1", features = ["full"] }
@@ -24,5 +25,6 @@ tokio-util = "0.7.11"
 
 [dev-dependencies]
 parking_lot = "0.12.3"
+rcgen = "0.13.1"
 
 [features]

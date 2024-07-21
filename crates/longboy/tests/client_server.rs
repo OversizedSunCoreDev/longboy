@@ -1,5 +1,5 @@
 use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
+    net::{SocketAddr, UdpSocket},
     sync::Arc,
 };
 
@@ -8,16 +8,18 @@ use flume::{Receiver as FlumeReceiver, Sender as FlumeSender};
 use parking_lot::Mutex;
 
 use longboy::{
-    Client, ClientToServerSchema, Factory, Mirroring, Runtime, RuntimeTask, Server, ServerToClientSchema, Session,
-    Sink, Source,
+    Client, ClientSession, ClientToServerSchema, Factory, Mirroring, Runtime, RuntimeTask, Server, ServerSession,
+    ServerToClientSchema, Sink, Source,
 };
-
-#[derive(Clone)]
-struct TestSession
-{
-    session_id: u64,
-    cipher_key: u64,
-}
+use quinn::{
+    rustls::{
+        pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer},
+        RootCertStore,
+    },
+    ClientConfig, Connection, Endpoint, ServerConfig,
+};
+use rcgen::CertifiedKey;
+use tokio::join;
 
 #[derive(Clone)]
 struct TestRuntime
@@ -62,24 +64,6 @@ struct TestServerToClientSource
 struct TestServerToClientSink
 {
     channel: FlumeSender<(u32, [u64; 2])>,
-}
-
-impl Session for TestSession
-{
-    fn ip_addr(&self) -> IpAddr
-    {
-        IpAddr::V4(Ipv4Addr::from([127, 0, 0, 1]))
-    }
-
-    fn session_id(&self) -> u64
-    {
-        self.session_id
-    }
-
-    fn cipher_key(&self) -> u64
-    {
-        self.cipher_key
-    }
 }
 
 impl TestRuntime
@@ -214,10 +198,61 @@ impl Sink<32> for TestServerToClientSink
     }
 }
 
-#[test]
-fn golden()
+async fn connect(
+    server_endpoint: &Endpoint,
+    client_endpoint: &Endpoint,
+    certified_key: &CertifiedKey,
+) -> (Connection, Connection)
+{
+    let mut root_cert_store = RootCertStore::empty();
+    root_cert_store.add(certified_key.cert.der().clone()).unwrap();
+
+    join!(
+        async { server_endpoint.accept().await.unwrap().await.unwrap() },
+        async {
+            client_endpoint
+                .connect_with(
+                    ClientConfig::with_root_certificates(Arc::new(root_cert_store)).unwrap(),
+                    server_endpoint.local_addr().unwrap(),
+                    "localhost",
+                )
+                .unwrap()
+                .await
+                .unwrap()
+        }
+    )
+}
+
+#[tokio::test]
+async fn golden()
 {
     const TICK_PERIOD: u16 = 0;
+
+    let certified_key = rcgen::generate_simple_self_signed([String::from("localhost")]).unwrap();
+
+    let server_endpoint = Endpoint::server(
+        ServerConfig::with_single_cert(
+            Vec::from([certified_key.cert.der().clone()]),
+            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der())),
+        )
+        .unwrap(),
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+    )
+    .unwrap();
+    let client_endpoint_1 = Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let client_endpoint_2 = Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+
+    let connections_1 = connect(&server_endpoint, &client_endpoint_1, &certified_key).await;
+    let connections_2 = connect(&server_endpoint, &client_endpoint_2, &certified_key).await;
+
+    let server_session_1 = ServerSession::new(1, 0xDEADBEEFDEADBEEF, connections_1.0)
+        .await
+        .unwrap();
+    let server_session_2 = ServerSession::new(2, 0xBEEFDEADBEEFDEAD, connections_2.0)
+        .await
+        .unwrap();
+    let client_session_1 = ClientSession::new(connections_1.1).await.unwrap();
+    let client_session_2 = ClientSession::new(connections_2.1).await.unwrap();
 
     let client_to_server_mapper_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
     let client_to_server_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
@@ -240,17 +275,6 @@ fn golden()
         heartbeat_period: 2000,
     };
 
-    let sessions = [
-        TestSession {
-            session_id: 1,
-            cipher_key: 0xDEADBEEFDEADBEEF,
-        },
-        TestSession {
-            session_id: 2,
-            cipher_key: 0xBEEFDEADBEEFDEAD,
-        },
-    ];
-
     let server_runtime = TestRuntime::new(TICK_PERIOD);
     let server_source_channels = [flume::unbounded(), flume::unbounded()];
     let server_sink_channel = flume::unbounded();
@@ -259,7 +283,7 @@ fn golden()
     let client_source_channels = [flume::unbounded(), flume::unbounded()];
     let client_sink_channels = [flume::unbounded(), flume::unbounded()];
 
-    let mut server = Server::builder(Box::new(server_runtime.clone()), 2)
+    let mut server = Server::builder(2, Box::new(server_runtime.clone()))
         .sender_with_sockets::<_, 32, 3>(
             &server_to_client_schema,
             server_to_client_mapper_socket,
@@ -283,10 +307,10 @@ fn golden()
         )
         .unwrap()
         .build();
-    server.register(Box::new(sessions[0].clone()));
-    server.register(Box::new(sessions[1].clone()));
+    server.register(server_session_1);
+    server.register(server_session_2);
 
-    let _client_1 = Client::builder(Box::new(client_runtimes[0].clone()), Box::new(sessions[0].clone()))
+    let _client_1 = Client::builder(client_session_1, Box::new(client_runtimes[0].clone()))
         .sender::<_, 16, 3>(
             &client_to_server_schema,
             TestClientToServerSource {
@@ -303,7 +327,7 @@ fn golden()
         .unwrap()
         .build();
 
-    let _client_2 = Client::builder(Box::new(client_runtimes[1].clone()), Box::new(sessions[1].clone()))
+    let _client_2 = Client::builder(client_session_2, Box::new(client_runtimes[1].clone()))
         .sender::<_, 16, 3>(
             &client_to_server_schema,
             TestClientToServerSource {

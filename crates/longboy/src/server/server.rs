@@ -6,34 +6,34 @@ use flume::Sender as FlumeSender;
 use fnv::{FnvHashMap, FnvHashSet};
 
 use crate::{
-    ClientToServerReceiver, ClientToServerSchema, Constants, Factory, Mirroring, Runtime, RuntimeTask,
-    ServerToClientSchema, ServerToClientSender, Session, SessionEvent, Sink, Source,
+    ClientToServerReceiver, ClientToServerSchema, Constants, Factory, Mirroring, Runtime, RuntimeTask, ServerSession,
+    ServerSessionEvent, ServerToClientSchema, ServerToClientSender, Sink, Source,
 };
 
 pub struct Server
 {
+    sessions: FnvHashMap<u64, ServerSession>,
+    session_senders: Box<[FlumeSender<ServerSessionEvent>]>,
     runtime: Box<dyn Runtime>,
-    sessions: FnvHashMap<u64, Box<dyn Session>>,
-    session_senders: Box<[FlumeSender<SessionEvent>]>,
 }
 
 pub struct ServerBuilder
 {
-    runtime: Box<dyn Runtime>,
     session_capacity: usize,
+    runtime: Box<dyn Runtime>,
 
     ports: FnvHashSet<u16>,
+    session_senders: Vec<FlumeSender<ServerSessionEvent>>,
     tasks: Vec<Box<dyn RuntimeTask>>,
-    session_senders: Vec<FlumeSender<SessionEvent>>,
 }
 
 impl Server
 {
-    pub fn builder(runtime: Box<dyn Runtime>, session_capacity: usize) -> ServerBuilder
+    pub fn builder(session_capacity: usize, runtime: Box<dyn Runtime>) -> ServerBuilder
     {
         ServerBuilder {
-            runtime: runtime,
             session_capacity: session_capacity,
+            runtime: runtime,
 
             ports: FnvHashSet::default(),
             tasks: Vec::new(),
@@ -41,7 +41,7 @@ impl Server
         }
     }
 
-    pub fn register(&mut self, session: Box<dyn Session>)
+    pub fn register(&mut self, session: ServerSession)
     {
         assert!(self.sessions.len() < self.sessions.capacity());
 
@@ -51,7 +51,7 @@ impl Server
         self.sessions.insert(session_id, session);
         self.session_senders.iter().for_each(|session_sender| {
             session_sender
-                .send(SessionEvent::Connected {
+                .send(ServerSessionEvent::Connected {
                     session_id: session_id,
                     cipher_key: cipher_key,
                 })
@@ -65,7 +65,7 @@ impl Server
 
         self.session_senders.iter().for_each(|session_sender| {
             session_sender
-                .send(SessionEvent::Disconnected { session_id: session_id })
+                .send(ServerSessionEvent::Disconnected { session_id: session_id })
                 .unwrap()
         });
         self.sessions.remove(&session_id);
@@ -217,9 +217,9 @@ impl ServerBuilder
         }
 
         Server {
-            runtime: self.runtime,
             sessions: FnvHashMap::with_capacity_and_hasher(self.session_capacity, Default::default()),
             session_senders: self.session_senders.into_boxed_slice(),
+            runtime: self.runtime,
         }
     }
 }

@@ -1,4 +1,4 @@
-pub(crate) enum SessionEvent
+pub(crate) enum ServerSessionEvent
 {
     Connected
     {
