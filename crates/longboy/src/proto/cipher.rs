@@ -15,20 +15,22 @@ impl<const SIZE: usize> Cipher<SIZE>
 {
     pub(crate) fn new(key: u64) -> Self
     {
+        let key_bytes = key.to_ne_bytes();
+        let key_array = Array::<u8, U8>::try_from(&key_bytes[..]).expect("key_bytes length must match U8");
         Self {
-            header_cipher: RC5::new(key.to_ne_bytes().as_ref()),
-            slot_cipher: RC5::new(key.to_ne_bytes().as_ref()),
+            header_cipher: RC5::new(&key_array),
+            slot_cipher: RC5::new(&key_array),
         }
     }
 
     pub(crate) fn encrypt_header(&self, block: &mut [u8; 4])
     {
-        self.header_cipher.encrypt_block(block.as_mut())
+        self.header_cipher.encrypt_block(block.into())
     }
 
     pub(crate) fn decrypt_header(&self, block: &mut [u8; 4])
     {
-        self.header_cipher.decrypt_block(block.as_mut())
+        self.header_cipher.decrypt_block(block.into())
     }
 
     pub(crate) fn encrypt_slot(&self, block: &mut [u8; SIZE])
