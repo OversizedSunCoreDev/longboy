@@ -544,8 +544,6 @@ where
 
     for i in 0..WINDOW_SIZE
     {
-        accumulator += 1;
-
         let mut datagram = Box::new(*sender.poll_datagram(timestamp).unwrap());
         receiver.handle_datagram(timestamp, &mut datagram);
         assert_eq!(sender.cycle(), WINDOW_SIZE + 1 + i);

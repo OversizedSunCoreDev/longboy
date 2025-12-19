@@ -1,11 +1,7 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(generic_const_items)]
-#![feature(iter_chain)]
-#![feature(let_chains)]
 #![feature(map_try_insert)]
-#![feature(new_uninit)]
-#![feature(slice_as_chunks)]
 #![feature(try_blocks)]
 
 // API
