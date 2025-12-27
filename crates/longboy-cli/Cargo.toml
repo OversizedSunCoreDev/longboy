@@ -1,0 +1,14 @@
+[package]
+name = "longboy-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+config = "0.15.19"
+longboy = { version = "1.0.0", path = "../longboy" }
+quinn = "0.11.9"
+rustls = "0.23.35"
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = "1.48.0"
+tokio-util = "0.7.17"
