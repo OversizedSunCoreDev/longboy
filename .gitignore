@@ -12,3 +12,9 @@ Cargo.lock
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
+
+# dotenv environment variable files
+.env
+
+# A bunch of local certificates files for testing
+crates/longboy-server-cli/test/data

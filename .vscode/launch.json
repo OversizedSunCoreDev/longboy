@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "type": "cppdbg",
+            "request": "launch",
+            "name": "Launch longboy-client-cli",
+            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/target/debug/longboy-client-cli",
+            "envFile": "${workspaceFolder}/.env",
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "short"
+                },
+                {
+                    "name": "RUSTC_TOOLCHAIN",
+                    "value": "/Users/martinhollstein/.rustup/toolchains/nightly-aarch64-apple-darwin"
+                }
+            ],
+            "args": [],
+            "sourceFileMap": {},
+            "osx": {
+                "MIMode": "lldb"
+            }
+        }
+    ]
+}
