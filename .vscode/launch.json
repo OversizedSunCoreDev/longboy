@@ -1,4 +1,5 @@
 {
+    "version": "0.2.0",
     "configurations": [
         {
             "type": "cppdbg",
@@ -19,6 +20,16 @@
             ],
             "args": [],
             "sourceFileMap": {},
+            "osx": {
+                "MIMode": "lldb"
+            }
+        },
+        {
+            "type": "cppdbg", // Use "type": "cppdbg" for Windows C/C++ extension
+            "request": "attach",
+            "name": "Attach to Process by PID",
+            "program": "${workspaceFolder}/target/debug/longboy-server-cli",
+            "processId": "${command:pickProcess}", // Provides a filterable list of running processes
             "osx": {
                 "MIMode": "lldb"
             }

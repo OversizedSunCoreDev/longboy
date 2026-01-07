@@ -1,20 +1,26 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(generic_const_items)]
-#![feature(map_try_insert)]
-#![feature(try_blocks)]
 
-use enum_map::enum_map;
 use anyhow::{Context, Result};
 use config::Config;
+use enum_map::enum_map;
 use flume::{Receiver, Sender};
-use longboy::{ClientToServerSchema, Factory, Mirroring, Server, ServerSession, ServerToClientSchema, Source, Sink, ThreadRuntime, TokioRuntime};
+use longboy::{
+    ClientToServerSchema, Factory, Mirroring, Server, ServerSession, ServerToClientSchema, Sink, Source, ThreadRuntime,
+    TokioRuntime,
+};
 use quinn::{Connection, Endpoint, crypto::rustls::QuicServerConfig};
 use rustls::{
     crypto::{CryptoProvider, aws_lc_rs},
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject},
 };
-use std::{net::{SocketAddr, UdpSocket}, sync::Arc};
+use std::{
+    net::{SocketAddr, UdpSocket},
+    sync::Arc,
+    thread::yield_now,
+};
+use tokio::task;
 use tokio_util::sync::CancellationToken;
 
 // This really could be a feature in the toml configuration crate.
@@ -41,7 +47,7 @@ struct LongboyServerConfig
 // Server runtime sender and receiver behaviors.
 struct ServerToClientSourceFactory
 {
-    channels: [Receiver<(u32, [u64; 2])>; 32 /* max players per instance */],
+    channels: [Receiver<(u32, [u64; 2])>; 32],
 }
 
 struct ClientToServerSinkFactory
@@ -105,6 +111,7 @@ impl Sink<16> for ClientToServerSink
     {
         let frame = u32::from_le_bytes(*(<&[u8; 4]>::try_from(&buffer[0..4]).unwrap()));
         let player_input = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[4..12]).unwrap()));
+        println!("Recv'd Frame({}) PlayerInput({})", frame, player_input);
         self.channel.send((frame, self.player_index, player_input)).unwrap();
     }
 }
@@ -117,9 +124,11 @@ impl Source<32> for ServerToClientSource
         {
             Ok((frame, player_inputs)) =>
             {
+
                 *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
                 *(<&mut [u8; 8]>::try_from(&mut buffer[4..12]).unwrap()) = player_inputs[0].to_le_bytes();
                 *(<&mut [u8; 8]>::try_from(&mut buffer[12..20]).unwrap()) = player_inputs[1].to_le_bytes();
+                println!("SendFrame({}) PlayerInput0({}) PlayerInput1({})", frame, player_inputs[0], player_inputs[1]);
                 true
             }
             Err(_) => false,
@@ -180,6 +189,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
         mapper_port: server_to_client_mapper_socket.local_addr()?.port(),
         heartbeat_period: 2000,
     };
+    let receiver_channel = flume::unbounded();
     let server_builder = Server::builder(config.session_capacity, server_runtime)
         .sender_with_sockets::<_, 32, 3>(
             &server_to_client_schema,
@@ -222,7 +232,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
                     flume::unbounded().1,
                     flume::unbounded().1,
                     flume::unbounded().1,
-                    flume::unbounded().1
+                    flume::unbounded().1,
                 ],
             },
         )?
@@ -231,7 +241,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
             client_to_server_mapper_socket,
             client_to_server_socket,
             ClientToServerSinkFactory {
-                channel: flume::unbounded().0,
+                channel: receiver_channel.0,
             },
         )?;
 
@@ -297,18 +307,22 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
         // try to accept and handle errors gracefully
         match conn.accept()
         {
-            Err(e) => {
+            Err(e) =>
+            {
                 println!("Failed to accept connection: {:?}", e);
                 continue;
             }
-            Ok(connecting) => {
+            Ok(connecting) =>
+            {
                 match connecting.await
                 {
-                    Err(e) => {
+                    Err(e) =>
+                    {
                         println!("Failed to establish connection: {:?}", e);
                         continue;
                     }
-                    Ok(connection) => {
+                    Ok(connection) =>
+                    {
                         // handle the connection
                         if let Err(e) = server_handle_connection(connection, &mut server_instance).await
                         {
@@ -316,7 +330,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
                         }
                     }
                 }
-            },
+            }
         }
     }
 
@@ -328,17 +342,17 @@ async fn server_handle_connection(conn: Connection, server: &mut Server) -> Resu
     let remote_address = conn.remote_address();
     println!("New connection from {}", remote_address);
 
-    let session_id = 0;
+    let session_id = 1;
     let cipher_key = 0xdeadbeef;
     let server_session = ServerSession::new(session_id, cipher_key, conn).await?;
     server.register(server_session); // Perhaps this should handle errors in some way? Client ditches mid stream?
 
-    loop {
-        // Here you would handle incoming requests, manage sessions, etc.
-        // For demonstration, we will just break the loop.
-        break;
+    loop
+    {
+        // read stuff
+        yield_now();
     }
 
-    print!("Server session registered\t\nSession Id: {}\t\nRemote Address: {}\n", session_id, remote_address);
-    Ok(())
+    //print!("Server session registered\t\nSession Id: {}\t\nRemote Address: {}\n", session_id, remote_address);
+    //Ok(())
 }
