@@ -1,12 +1,20 @@
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
+#![feature(generic_const_items)]
+#![feature(map_try_insert)]
+#![feature(try_blocks)]
+
+use enum_map::enum_map;
 use anyhow::{Context, Result};
 use config::Config;
-use longboy::{Server, ServerSession, ThreadRuntime, TokioRuntime};
+use flume::{Receiver, Sender};
+use longboy::{ClientToServerSchema, Factory, Mirroring, Server, ServerSession, ServerToClientSchema, Source, Sink, ThreadRuntime, TokioRuntime};
 use quinn::{Connection, Endpoint, crypto::rustls::QuicServerConfig};
 use rustls::{
     crypto::{CryptoProvider, aws_lc_rs},
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject},
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::{SocketAddr, UdpSocket}, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
 // This really could be a feature in the toml configuration crate.
@@ -28,6 +36,95 @@ struct LongboyServerConfig
     public_certificate_path: String,
     private_key_path: String,
     listen_address: Option<SocketAddr>,
+}
+
+// Server runtime sender and receiver behaviors.
+struct ServerToClientSourceFactory
+{
+    channels: [Receiver<(u32, [u64; 2])>; 32 /* max players per instance */],
+}
+
+struct ClientToServerSinkFactory
+{
+    channel: Sender<(u32, u8, u64)>,
+}
+
+struct ClientToServerSink
+{
+    player_index: u8,
+    channel: Sender<(u32, u8, u64)>,
+}
+
+struct ServerToClientSource
+{
+    channel: Receiver<(u32, [u64; 2])>,
+}
+
+impl Factory for ServerToClientSourceFactory
+{
+    type Type = ServerToClientSource;
+
+    fn invoke(&mut self, session_id: u64) -> Self::Type
+    {
+        let player_index = match session_id
+        {
+            1 => 0,
+            2 => 1,
+            _ => unreachable!(),
+        };
+
+        ServerToClientSource {
+            channel: self.channels[player_index].clone(),
+        }
+    }
+}
+
+impl Factory for ClientToServerSinkFactory
+{
+    type Type = ClientToServerSink;
+
+    fn invoke(&mut self, session_id: u64) -> Self::Type
+    {
+        let player_index = match session_id
+        {
+            1 => 0,
+            2 => 1,
+            _ => unreachable!(),
+        };
+
+        ClientToServerSink {
+            player_index,
+            channel: self.channel.clone(),
+        }
+    }
+}
+
+impl Sink<16> for ClientToServerSink
+{
+    fn handle(&mut self, buffer: &[u8; 16])
+    {
+        let frame = u32::from_le_bytes(*(<&[u8; 4]>::try_from(&buffer[0..4]).unwrap()));
+        let player_input = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[4..12]).unwrap()));
+        self.channel.send((frame, self.player_index, player_input)).unwrap();
+    }
+}
+
+impl Source<32> for ServerToClientSource
+{
+    fn poll(&mut self, buffer: &mut [u8; 32]) -> bool
+    {
+        match self.channel.try_recv()
+        {
+            Ok((frame, player_inputs)) =>
+            {
+                *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
+                *(<&mut [u8; 8]>::try_from(&mut buffer[4..12]).unwrap()) = player_inputs[0].to_le_bytes();
+                *(<&mut [u8; 8]>::try_from(&mut buffer[12..20]).unwrap()) = player_inputs[1].to_le_bytes();
+                true
+            }
+            Err(_) => false,
+        }
+    }
 }
 
 /// Entry point of the application.
@@ -67,7 +164,76 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
             Box::new(ThreadRuntime::new(cancellation_token.clone())) as Box<dyn longboy::Runtime>
         }
     };
-    let server_builder = Server::builder(config.session_capacity, server_runtime);
+
+    // Setup the receivers and senders for client-server communication.
+    let client_to_server_mapper_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
+    let client_to_server_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
+    let server_to_client_mapper_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
+    let client_to_server_schema = ClientToServerSchema {
+        name: "Input",
+        mapper_port: client_to_server_mapper_socket.local_addr()?.port(),
+        heartbeat_period: 2000,
+        port: client_to_server_socket.local_addr()?.port(),
+    };
+    let server_to_client_schema = ServerToClientSchema {
+        name: "State",
+        mapper_port: server_to_client_mapper_socket.local_addr()?.port(),
+        heartbeat_period: 2000,
+    };
+    let server_builder = Server::builder(config.session_capacity, server_runtime)
+        .sender_with_sockets::<_, 32, 3>(
+            &server_to_client_schema,
+            server_to_client_mapper_socket,
+            enum_map! {
+                Mirroring::AudioVideo => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0)))?,
+                Mirroring::Background => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0)))?,
+                Mirroring::Voice => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0)))?,
+            },
+            ServerToClientSourceFactory {
+                channels: [
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1,
+                    flume::unbounded().1
+                ],
+            },
+        )?
+        .receiver_with_socket::<_, 16, 3>(
+            &client_to_server_schema,
+            client_to_server_mapper_socket,
+            client_to_server_socket,
+            ClientToServerSinkFactory {
+                channel: flume::unbounded().0,
+            },
+        )?;
 
     // Load TLS certificates. TLS is required.
     let provider = aws_lc_rs::default_provider();
@@ -165,7 +331,13 @@ async fn server_handle_connection(conn: Connection, server: &mut Server) -> Resu
     let session_id = 0;
     let cipher_key = 0xdeadbeef;
     let server_session = ServerSession::new(session_id, cipher_key, conn).await?;
-    server.register(server_session);
+    server.register(server_session); // Perhaps this should handle errors in some way? Client ditches mid stream?
+
+    loop {
+        // Here you would handle incoming requests, manage sessions, etc.
+        // For demonstration, we will just break the loop.
+        break;
+    }
 
     print!("Server session registered\t\nSession Id: {}\t\nRemote Address: {}\n", session_id, remote_address);
     Ok(())
