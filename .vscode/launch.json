@@ -15,7 +15,30 @@
                 },
                 {
                     "name": "RUSTC_TOOLCHAIN",
-                    "value": "/Users/martinhollstein/.rustup/toolchains/nightly-aarch64-apple-darwin"
+                    "value": "~/.rustup/toolchains/nightly-aarch64-apple-darwin"
+                }
+            ],
+            "args": [],
+            "sourceFileMap": {},
+            "osx": {
+                "MIMode": "lldb"
+            }
+        },
+        {
+            "type": "cppdbg",
+            "request": "launch",
+            "name": "Launch longboy-server-cli",
+            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/target/debug/longboy-server-cli",
+            "envFile": "${workspaceFolder}/.env",
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "short"
+                },
+                {
+                    "name": "RUSTC_TOOLCHAIN",
+                    "value": "~/.rustup/toolchains/nightly-aarch64-apple-darwin"
                 }
             ],
             "args": [],
@@ -27,8 +50,18 @@
         {
             "type": "cppdbg", // Use "type": "cppdbg" for Windows C/C++ extension
             "request": "attach",
-            "name": "Attach to Process by PID",
+            "name": "longboy-server-cli by PID",
             "program": "${workspaceFolder}/target/debug/longboy-server-cli",
+            "processId": "${command:pickProcess}", // Provides a filterable list of running processes
+            "osx": {
+                "MIMode": "lldb"
+            }
+        },
+        {
+            "type": "cppdbg", // Use "type": "cppdbg" for Windows C/C++ extension
+            "request": "attach",
+            "name": "longboy-client-cli by PID",
+            "program": "${workspaceFolder}/target/debug/longboy-client-cli",
             "processId": "${command:pickProcess}", // Provides a filterable list of running processes
             "osx": {
                 "MIMode": "lldb"

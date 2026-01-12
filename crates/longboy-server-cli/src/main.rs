@@ -18,9 +18,7 @@ use rustls::{
 use std::{
     net::{SocketAddr, UdpSocket},
     sync::Arc,
-    thread::yield_now,
 };
-use tokio::task;
 use tokio_util::sync::CancellationToken;
 
 // This really could be a feature in the toml configuration crate.
@@ -47,7 +45,7 @@ struct LongboyServerConfig
 // Server runtime sender and receiver behaviors.
 struct ServerToClientSourceFactory
 {
-    channels: [Receiver<(u32, [u64; 2])>; 32],
+    channels: [Receiver<(u32, [u64; 2])>; 16],
 }
 
 struct ClientToServerSinkFactory
@@ -124,7 +122,6 @@ impl Source<32> for ServerToClientSource
         {
             Ok((frame, player_inputs)) =>
             {
-
                 *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
                 *(<&mut [u8; 8]>::try_from(&mut buffer[4..12]).unwrap()) = player_inputs[0].to_le_bytes();
                 *(<&mut [u8; 8]>::try_from(&mut buffer[12..20]).unwrap()) = player_inputs[1].to_le_bytes();
@@ -190,6 +187,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
         heartbeat_period: 2000,
     };
     let receiver_channel = flume::unbounded();
+    let broadcast_channel = flume::unbounded();
     let server_builder = Server::builder(config.session_capacity, server_runtime)
         .sender_with_sockets::<_, 32, 3>(
             &server_to_client_schema,
@@ -201,38 +199,22 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
             },
             ServerToClientSourceFactory {
                 channels: [
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
-                    flume::unbounded().1,
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
+                    broadcast_channel.1.clone(),
                 ],
             },
         )?
@@ -342,17 +324,9 @@ async fn server_handle_connection(conn: Connection, server: &mut Server) -> Resu
     let remote_address = conn.remote_address();
     println!("New connection from {}", remote_address);
 
-    let session_id = 1;
+    let session_id = 1; // Should have an accessible server session manager (with player index mapping)
     let cipher_key = 0xdeadbeef;
     let server_session = ServerSession::new(session_id, cipher_key, conn).await?;
     server.register(server_session); // Perhaps this should handle errors in some way? Client ditches mid stream?
-
-    loop
-    {
-        // read stuff
-        yield_now();
-    }
-
-    //print!("Server session registered\t\nSession Id: {}\t\nRemote Address: {}\n", session_id, remote_address);
-    //Ok(())
+    Ok(())
 }

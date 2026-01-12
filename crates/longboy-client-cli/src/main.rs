@@ -3,10 +3,20 @@
 #![feature(generic_const_items)]
 #![feature(unboxed_closures)]
 
-use std::{net::{SocketAddr, UdpSocket}, sync::Arc, thread::yield_now};
+use std::{
+    net::{SocketAddr, UdpSocket},
+    process,
+    sync::Arc,
+    thread::{self},
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
 use config::Config;
+use crossterm::{
+    event::{self, Event, KeyCode},
+    terminal::{disable_raw_mode, enable_raw_mode},
+};
 use longboy::{Client, ClientSession, ClientToServerSchema, ServerToClientSchema, Sink, Source};
 use quinn::{ClientConfig, Endpoint};
 use rustls::{
@@ -14,8 +24,6 @@ use rustls::{
     pki_types::{CertificateDer, pem::PemObject},
 };
 use rustls_native_certs::load_native_certs;
-use crossterm::event::{self, Event, KeyCode};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 #[derive(serde::Deserialize)]
 struct LongboyClientConfig
@@ -32,26 +40,24 @@ struct ServerToClientSink
 
 struct ClientToServerSource
 {
+    channel: flume::Receiver<(u32, u64)>,
 }
 
 impl Source<16> for ClientToServerSource
 {
     fn poll(&mut self, buffer: &mut [u8; 16]) -> bool
     {
-        if let Event::Key(key_event) = event::read().unwrap() {
-            let frame: i32 = 0;
-            match key_event.code {
-                KeyCode::Esc => false,
-                KeyCode::Char(val) => {
-                    print!("Sending {}", val);
-                    *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
-                    *(<&mut [u8; 8]>::try_from(&mut buffer[4..12]).unwrap()) = u64::from(val).to_le_bytes();
-                    true
-                }
-                _ => false,
+        let msg = self.channel.recv();
+        match msg
+        {
+            Ok((frame, val)) =>
+            {
+                print!("Sending {}", val);
+                *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
+                *(<&mut [u8; 8]>::try_from(&mut buffer[4..12]).unwrap()) = u64::from(val).to_le_bytes();
+                true
             }
-        } else {
-            false
+            _ => false,
         }
     }
 }
@@ -69,7 +75,7 @@ impl Sink<32> for ServerToClientSink
 
 fn main()
 {
-    enable_raw_mode(); // Enters raw mode
+    let _ = enable_raw_mode(); // Enters raw mode
 
     let base_config_dir = std::env::var("LONGBOY_CONFIG_DIR").unwrap_or_else(|_| ".".to_string());
     // Setup the configuration builder for the server. Let environment variables take the highest precedence.
@@ -86,7 +92,7 @@ fn main()
         eprintln!("Error running longboy client: {err:#}");
     }
 
-    disable_raw_mode(); // Exits raw mode
+    let _ = disable_raw_mode(); // Exits raw mode
 }
 
 #[tokio::main]
@@ -166,19 +172,64 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
     };
 
     let receiver_channel = flume::unbounded();
+    let sender_channel = flume::unbounded();
     let _longboy_client = Client::builder(client_session, Box::new(runtime))
-        .receiver::<_, 32, 3>(&server_to_client_schema, ServerToClientSink{
-            channel: receiver_channel.0
-        })?
-        .sender::<_, 16, 3>(&client_to_server_schema, ClientToServerSource {
-        })?
+        .receiver::<_, 32, 3>(
+            &server_to_client_schema,
+            ServerToClientSink {
+                channel: receiver_channel.0,
+            },
+        )?
+        .sender::<_, 16, 3>(
+            &client_to_server_schema,
+            ClientToServerSource {
+                channel: sender_channel.1,
+            },
+        )?
         .build();
 
     // Client was created, for now just log and exit.
     println!("Longboy client session established.");
 
+    // dump server events
+    tokio::spawn(async move {
+        let recv = receiver_channel.1.clone();
+        loop
+        {
+            let incoming = recv.recv_async().await;
 
-    loop {
-        yield_now();
+            match incoming
+            {
+                Ok((frame, [first, second])) =>
+                {
+                    println!("Recv'd Frame({}) ({} ; {})", frame, first, second)
+                }
+                Err(e) => println!("{}", e),
+            }
+        }
+    });
+
+    let mut frame: u32 = 0;
+    // init with some garbage
+    sender_channel.0.send((frame, u64::from('z')))?;
+    loop
+    {
+        // send keys
+        if let Event::Key(key_event) = event::read().unwrap()
+        {
+            match key_event.code
+            {
+                KeyCode::Esc => process::exit(0),
+                KeyCode::Char(val) =>
+                {
+                    println!("Sending Frame({}) {}", frame, val);
+                    let as64 = u64::from(val);
+                    sender_channel.0.send((frame, as64)).unwrap();
+                }
+                _ => (),
+            }
+        }
+        frame += 1;
+        thread::sleep(Duration::from_millis(1));
     }
 }
