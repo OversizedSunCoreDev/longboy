@@ -171,10 +171,11 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
         }
     };
 
-    // Setup the receivers and senders for client-server communication.
+    // Setup the receivers for client-server communication.
     let client_to_server_mapper_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
     let client_to_server_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
-    let server_to_client_mapper_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
+
+    println!("Ports {}, {}", client_to_server_mapper_socket.local_addr()?.port(),  client_to_server_socket.local_addr()?.port());
     let client_to_server_schema = ClientToServerSchema {
         name: "Input",
         mapper_port: client_to_server_mapper_socket.local_addr()?.port(),
@@ -183,20 +184,14 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     };
     let server_to_client_schema = ServerToClientSchema {
         name: "State",
-        mapper_port: server_to_client_mapper_socket.local_addr()?.port(),
+        mapper_port: 8080,
         heartbeat_period: 2000,
     };
     let receiver_channel = flume::unbounded();
     let broadcast_channel = flume::unbounded();
     let server_builder = Server::builder(config.session_capacity, server_runtime)
-        .sender_with_sockets::<_, 32, 3>(
+        .sender::<_, 32, 3>(
             &server_to_client_schema,
-            server_to_client_mapper_socket,
-            enum_map! {
-                Mirroring::AudioVideo => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0)))?,
-                Mirroring::Background => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0)))?,
-                Mirroring::Voice => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0)))?,
-            },
             ServerToClientSourceFactory {
                 channels: [
                     broadcast_channel.1.clone(),

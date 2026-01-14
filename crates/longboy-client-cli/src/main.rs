@@ -152,22 +152,18 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
     // Create longboy client sessions
     let client_session = ClientSession::new(connection).await?;
 
-    let client_to_server_mapper_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
-    let client_to_server_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
-    let server_to_client_mapper_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
-
     // Session established, create the longboy client using tokyo runtime.
     let runtime = longboy::TokioRuntime::new(tokio_util::sync::CancellationToken::new());
     let client_to_server_schema = ClientToServerSchema {
         name: "Input",
-        mapper_port: client_to_server_mapper_socket.local_addr().unwrap().port(),
+        mapper_port: 8081,
         heartbeat_period: 2000,
-        port: client_to_server_socket.local_addr().unwrap().port(),
+        port: 8082,
     };
 
     let server_to_client_schema = ServerToClientSchema {
         name: "State",
-        mapper_port: server_to_client_mapper_socket.local_addr().unwrap().port(),
+        mapper_port: 8080,
         heartbeat_period: 2000,
     };
 
