@@ -4,7 +4,7 @@
 #![feature(unboxed_closures)]
 
 use std::{
-    net::{SocketAddr, UdpSocket},
+    net::{SocketAddr},
     process,
     sync::Arc,
     thread::{self},
@@ -17,13 +17,14 @@ use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
 };
-use longboy::{Client, ClientSession, ClientToServerSchema, ServerToClientSchema, Sink, Source};
+use longboy::{Client, ClientSession, Sink, Source};
 use quinn::{ClientConfig, Endpoint};
 use rustls::{
     crypto::{CryptoProvider, aws_lc_rs},
     pki_types::{CertificateDer, pem::PemObject},
 };
 use rustls_native_certs::load_native_certs;
+use longboy_schema::{new_client_to_server_schema, new_server_to_client_schema};
 
 #[derive(serde::Deserialize)]
 struct LongboyClientConfig
@@ -154,19 +155,8 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
 
     // Session established, create the longboy client using tokyo runtime.
     let runtime = longboy::TokioRuntime::new(tokio_util::sync::CancellationToken::new());
-    let client_to_server_schema = ClientToServerSchema {
-        name: "Input",
-        mapper_port: 8081,
-        heartbeat_period: 2000,
-        port: 8082,
-    };
-
-    let server_to_client_schema = ServerToClientSchema {
-        name: "State",
-        mapper_port: 8080,
-        heartbeat_period: 2000,
-    };
-
+    let client_to_server_schema = new_client_to_server_schema();
+    let server_to_client_schema = new_server_to_client_schema();
     let receiver_channel = flume::unbounded();
     let sender_channel = flume::unbounded();
     let _longboy_client = Client::builder(client_session, Box::new(runtime))

@@ -4,21 +4,15 @@
 
 use anyhow::{Context, Result};
 use config::Config;
-use enum_map::enum_map;
 use flume::{Receiver, Sender};
-use longboy::{
-    ClientToServerSchema, Factory, Mirroring, Server, ServerSession, ServerToClientSchema, Sink, Source, ThreadRuntime,
-    TokioRuntime,
-};
+use longboy::{Factory, Server, ServerSession, Sink, Source, ThreadRuntime, TokioRuntime};
+use longboy_schema::{new_client_to_server_schema, new_server_to_client_schema};
 use quinn::{Connection, Endpoint, crypto::rustls::QuicServerConfig};
 use rustls::{
     crypto::{CryptoProvider, aws_lc_rs},
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject},
 };
-use std::{
-    net::{SocketAddr, UdpSocket},
-    sync::Arc,
-};
+use std::{net::SocketAddr, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
 // This really could be a feature in the toml configuration crate.
@@ -125,7 +119,10 @@ impl Source<32> for ServerToClientSource
                 *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
                 *(<&mut [u8; 8]>::try_from(&mut buffer[4..12]).unwrap()) = player_inputs[0].to_le_bytes();
                 *(<&mut [u8; 8]>::try_from(&mut buffer[12..20]).unwrap()) = player_inputs[1].to_le_bytes();
-                println!("SendFrame({}) PlayerInput0({}) PlayerInput1({})", frame, player_inputs[0], player_inputs[1]);
+                println!(
+                    "SendFrame({}) PlayerInput0({}) PlayerInput1({})",
+                    frame, player_inputs[0], player_inputs[1]
+                );
                 true
             }
             Err(_) => false,
@@ -172,21 +169,9 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     };
 
     // Setup the receivers for client-server communication.
-    let client_to_server_mapper_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
-    let client_to_server_socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).unwrap();
+    let server_to_client_schema = new_server_to_client_schema();
+    let client_to_server_schema = new_client_to_server_schema();
 
-    println!("Ports {}, {}", client_to_server_mapper_socket.local_addr()?.port(),  client_to_server_socket.local_addr()?.port());
-    let client_to_server_schema = ClientToServerSchema {
-        name: "Input",
-        mapper_port: client_to_server_mapper_socket.local_addr()?.port(),
-        heartbeat_period: 2000,
-        port: client_to_server_socket.local_addr()?.port(),
-    };
-    let server_to_client_schema = ServerToClientSchema {
-        name: "State",
-        mapper_port: 8080,
-        heartbeat_period: 2000,
-    };
     let receiver_channel = flume::unbounded();
     let broadcast_channel = flume::unbounded();
     let server_builder = Server::builder(config.session_capacity, server_runtime)
@@ -212,15 +197,13 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
                     broadcast_channel.1.clone(),
                 ],
             },
-        )?
-        .receiver_with_socket::<_, 16, 3>(
+        ).unwrap()
+        .receiver::<_, 16, 3>(
             &client_to_server_schema,
-            client_to_server_mapper_socket,
-            client_to_server_socket,
             ClientToServerSinkFactory {
                 channel: receiver_channel.0,
             },
-        )?;
+        ).unwrap();
 
     // Load TLS certificates. TLS is required.
     let provider = aws_lc_rs::default_provider();
