@@ -155,7 +155,7 @@ impl ServerBuilder
         let mapper_socket =
             UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], schema.mapper_port))).context(schema.name)?;
 
-        let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).context(schema.name)?;
+        let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], schema.port))).context(schema.name)?;
 
         self.receiver_with_socket::<SinkFactoryType, SIZE, WINDOW_SIZE>(schema, mapper_socket, socket, sink_factory)
     }
@@ -185,8 +185,8 @@ impl ServerBuilder
         {
             return Err(anyhow!(
                 "Schema's `port` does not match Socket port: {} vs {}",
-                schema.mapper_port,
-                mapper_socket.local_addr().unwrap().port()
+                schema.port,
+                socket.local_addr().unwrap().port()
             ))
             .context(schema.name);
         }
