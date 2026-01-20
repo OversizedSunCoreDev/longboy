@@ -23,7 +23,7 @@ impl<const SIZE: usize> Source<SIZE> for TestSource
     fn poll(&mut self, buffer: &mut [u8; SIZE]) -> bool
     {
         self.accumulator += 1;
-        match self.accumulator % self.period == 0
+        match self.accumulator.is_multiple_of(self.period)
         {
             true =>
             {
