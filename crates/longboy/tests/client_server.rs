@@ -12,11 +12,11 @@ use longboy::{
     ServerToClientSchema, Sink, Source,
 };
 use quinn::{
-    rustls::{
-        pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer},
-        RootCertStore,
-    },
     ClientConfig, Connection, Endpoint, ServerConfig,
+    rustls::{
+        RootCertStore,
+        pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer},
+    },
 };
 use rcgen::CertifiedKey;
 use tokio::join;

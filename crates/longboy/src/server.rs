@@ -11,8 +11,8 @@ pub use self::{factory::*, server_session::*};
 pub(crate) use self::{client_to_server_receiver::*, server_session_event::*, server_to_client_sender::*};
 
 use crate::{ClientToServerSchema, Constants, Mirroring, Runtime, RuntimeTask, ServerToClientSchema, Sink, Source};
-use anyhow::{anyhow, Context, Result};
-use enum_map::{enum_map, EnumMap};
+use anyhow::{Context, Result, anyhow};
+use enum_map::{EnumMap, enum_map};
 use flume::Sender as FlumeSender;
 use fnv::{FnvHashMap, FnvHashSet};
 use std::net::{SocketAddr, UdpSocket};
