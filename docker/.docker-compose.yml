@@ -28,6 +28,8 @@ services:
     stdin_open: true
     tty: true
     command: /bin/bash
+    deploy:
+      replicas: 2
 
 networks:
   longboy-network:

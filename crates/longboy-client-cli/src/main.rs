@@ -4,27 +4,25 @@
 #![feature(unboxed_closures)]
 
 use std::{
-    net::{SocketAddr},
-    process,
+    net::SocketAddr,
     sync::Arc,
-    thread::{self},
     time::Duration,
 };
 
 use anyhow::{Context, Result};
 use config::Config;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, poll},
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 use longboy::{Client, ClientSession, Sink, Source};
+use longboy_schema::{new_client_to_server_schema, new_server_to_client_schema};
 use quinn::{ClientConfig, Endpoint};
 use rustls::{
     crypto::{CryptoProvider, aws_lc_rs},
     pki_types::{CertificateDer, pem::PemObject},
 };
 use rustls_native_certs::load_native_certs;
-use longboy_schema::{new_client_to_server_schema, new_server_to_client_schema};
 
 #[derive(serde::Deserialize)]
 struct LongboyClientConfig
@@ -196,26 +194,28 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
     });
 
     let mut frame: u32 = 0;
-    // init with some garbage
-    sender_channel.0.send((frame, u64::from('z')))?;
     loop
     {
         // send keys
-        if let Event::Key(key_event) = event::read().unwrap()
+        if poll(Duration::from_millis(10))?
         {
-            match key_event.code
+            if let Event::Key(key_event) = event::read().unwrap()
             {
-                KeyCode::Esc => process::exit(0),
-                KeyCode::Char(val) =>
+                match key_event.code
                 {
-                    println!("Sending Frame({}) {}", frame, val);
-                    let as64 = u64::from(val);
-                    sender_channel.0.send((frame, as64)).unwrap();
+                    KeyCode::Esc => break,
+                    KeyCode::Char(val) =>
+                    {
+                        print!("Sending Frame({}) {}", frame, val);
+                        let as64 = u64::from(val);
+                        sender_channel.0.send((frame, as64)).unwrap();
+                    }
+                    _ => (),
                 }
-                _ => (),
             }
         }
         frame += 1;
-        thread::sleep(Duration::from_millis(1));
     }
+
+    Ok(())
 }

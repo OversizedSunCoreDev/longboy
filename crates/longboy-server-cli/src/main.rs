@@ -2,10 +2,11 @@
 #![feature(generic_const_exprs)]
 #![feature(generic_const_items)]
 
+mod broker;
+
 use anyhow::{Context, Result};
 use config::Config;
-use flume::{Receiver, Sender};
-use longboy::{Factory, Server, ServerSession, Sink, Source, ThreadRuntime, TokioRuntime};
+use longboy::{Server, ServerSession, ThreadRuntime, TokioRuntime};
 use longboy_schema::{new_client_to_server_schema, new_server_to_client_schema};
 use quinn::{Connection, Endpoint, crypto::rustls::QuicServerConfig};
 use rustls::{
@@ -14,6 +15,8 @@ use rustls::{
 };
 use std::{net::SocketAddr, sync::Arc};
 use tokio_util::sync::CancellationToken;
+
+use crate::broker::{ClientBroker, ServerBroker, SessionBroker};
 
 // This really could be a feature in the toml configuration crate.
 #[derive(serde::Deserialize)]
@@ -34,100 +37,6 @@ struct LongboyServerConfig
     public_certificate_path: String,
     private_key_path: String,
     listen_address: Option<SocketAddr>,
-}
-
-// Server runtime sender and receiver behaviors.
-struct ServerToClientSourceFactory
-{
-    channels: [Receiver<(u32, [u64; 2])>; 16],
-}
-
-struct ClientToServerSinkFactory
-{
-    channel: Sender<(u32, u8, u64)>,
-}
-
-struct ClientToServerSink
-{
-    player_index: u8,
-    channel: Sender<(u32, u8, u64)>,
-}
-
-struct ServerToClientSource
-{
-    channel: Receiver<(u32, [u64; 2])>,
-}
-
-impl Factory for ServerToClientSourceFactory
-{
-    type Type = ServerToClientSource;
-
-    fn invoke(&mut self, session_id: u64) -> Self::Type
-    {
-        let player_index = match session_id
-        {
-            1 => 0,
-            2 => 1,
-            _ => unreachable!(),
-        };
-
-        ServerToClientSource {
-            channel: self.channels[player_index].clone(),
-        }
-    }
-}
-
-impl Factory for ClientToServerSinkFactory
-{
-    type Type = ClientToServerSink;
-
-    fn invoke(&mut self, session_id: u64) -> Self::Type
-    {
-        let player_index = match session_id
-        {
-            1 => 0,
-            2 => 1,
-            _ => unreachable!(),
-        };
-
-        ClientToServerSink {
-            player_index,
-            channel: self.channel.clone(),
-        }
-    }
-}
-
-impl Sink<16> for ClientToServerSink
-{
-    fn handle(&mut self, buffer: &[u8; 16])
-    {
-        let frame = u32::from_le_bytes(*(<&[u8; 4]>::try_from(&buffer[0..4]).unwrap()));
-        let player_input = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[4..12]).unwrap()));
-        println!("Recv'd Frame({}) PlayerInput({})", frame, player_input);
-        self.channel.send((frame, self.player_index, player_input)).unwrap();
-    }
-}
-
-impl Source<32> for ServerToClientSource
-{
-    fn poll(&mut self, buffer: &mut [u8; 32]) -> bool
-    {
-        match self.channel.try_recv()
-        {
-            Ok((frame, player_inputs)) =>
-            {
-                *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
-                *(<&mut [u8; 8]>::try_from(&mut buffer[4..12]).unwrap()) = player_inputs[0].to_le_bytes();
-                *(<&mut [u8; 8]>::try_from(&mut buffer[12..20]).unwrap()) = player_inputs[1].to_le_bytes();
-                println!(
-                    "SendFrame({}) PlayerInput0({}) PlayerInput1({})",
-                    frame, player_inputs[0], player_inputs[1]
-                );
-                true
-            }
-            Err(_) => false,
-        }
-    }
 }
 
 /// Entry point of the application.
@@ -168,41 +77,22 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
         }
     };
 
+    let broker = std::sync::Arc::new(SessionBroker::<32>::new());
+    let client_broker = ClientBroker::new(broker.clone().into());
+    let server_broker = ServerBroker::new(broker.clone().into());
+
     // Setup the receivers for client-server communication.
     let server_to_client_schema = new_server_to_client_schema();
     let client_to_server_schema = new_client_to_server_schema();
 
-    let receiver_channel = flume::unbounded();
-    let broadcast_channel = flume::unbounded();
     let server_builder = Server::builder(config.session_capacity, server_runtime)
         .sender::<_, 32, 3>(
             &server_to_client_schema,
-            ServerToClientSourceFactory {
-                channels: [
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                    broadcast_channel.1.clone(),
-                ],
-            },
+            server_broker
         ).unwrap()
         .receiver::<_, 16, 3>(
             &client_to_server_schema,
-            ClientToServerSinkFactory {
-                channel: receiver_channel.0,
-            },
+            client_broker
         ).unwrap();
 
     // Load TLS certificates. TLS is required.
@@ -258,6 +148,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     // print stats from server endpoint
     println!("Server endpoint stats: {:?}", server_endpoint.stats());
 
+
     // start accepting connections
     while let Some(conn) = server_endpoint.accept().await
     {
@@ -284,7 +175,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
                     Ok(connection) =>
                     {
                         // handle the connection
-                        if let Err(e) = server_handle_connection(connection, &mut server_instance).await
+                        if let Err(e) = server_handle_connection(connection, &mut server_instance, &broker).await
                         {
                             println!("Error handling connection: {:?}", e);
                         }
@@ -297,12 +188,13 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     Ok(())
 }
 
-async fn server_handle_connection(conn: Connection, server: &mut Server) -> Result<()>
+async fn server_handle_connection(conn: Connection, server: &mut Server, broker: &std::sync::Arc<SessionBroker<32>>) -> Result<()>
 {
     let remote_address = conn.remote_address();
     println!("New connection from {}", remote_address);
 
-    let session_id = 1; // Should have an accessible server session manager (with player index mapping)
+    let player_index = broker.next_player_index()?;
+    let session_id = broker.allocate_session_id(player_index);
     let cipher_key = 0xdeadbeef;
     let server_session = ServerSession::new(session_id, cipher_key, conn).await?;
     server.register(server_session); // Perhaps this should handle errors in some way? Client ditches mid stream?

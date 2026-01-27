@@ -128,6 +128,7 @@ where
         let mut buffer = [0; 64];
         while let Ok((len, socket_addr)) = self.mapper_socket.recv_from(&mut buffer)
         {
+            println!("Received mapper datagram from {:?}, length {}", socket_addr, len);
             if len != std::mem::size_of::<u64>() + std::mem::size_of::<u8>()
             {
                 continue;
@@ -136,6 +137,13 @@ where
             let session_id = u64::from_le_bytes(*<&[u8; 8]>::try_from(&buffer[0..8]).unwrap());
 
             let mirroring = buffer[8] as usize;
+
+            println!(
+                "Mapping session_id {} mirroring {} to socket_addr {:?}",
+                session_id,
+                mirroring,
+                socket_addr
+            );
             if mirroring >= Mirroring::LENGTH
             {
                 continue;
@@ -160,6 +168,7 @@ where
         let mut buffer = [0; 512];
         while let Ok((len, socket_addr)) = self.socket.recv_from(&mut buffer)
         {
+            println!("Received datagram from {:?}, length {}", socket_addr, len);
             if len != DATAGRAM_SIZE
             {
                 continue;

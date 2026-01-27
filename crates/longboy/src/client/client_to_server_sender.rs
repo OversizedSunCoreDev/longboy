@@ -86,6 +86,8 @@ where
             for (mirroring, socket) in self.sockets.iter()
             {
                 buffer[8] = Mirroring::into_usize(mirroring) as u8;
+                // debug sent buffer
+                print!("Sending heartbeat buffer: {:?}", buffer);
                 socket
                     .send_to(&buffer, self.mapper_socket_addr)
                     .expect("send_to failure");
@@ -97,8 +99,10 @@ where
         // Poll Session
         if let Some(datagram) = self.sender.poll_datagram(timestamp)
         {
+            print!("Sending datagram: {:?}", datagram);
             for socket in self.sockets.values()
             {
+                // debug sent datagram
                 socket.send_to(datagram, self.socket_addr).expect("send_to failure");
             }
         }

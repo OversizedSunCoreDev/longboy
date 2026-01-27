@@ -124,6 +124,7 @@ where
             }
 
             let session_id = u64::from_le_bytes(*<&[u8; 8]>::try_from(&buffer[0..8]).unwrap());
+            println!("Received heartbeat from session_id {}, socket_addr {:?}", session_id, socket_addr);
 
             if let Some(index) = self.session_id_to_session_map.get(&session_id)
             {
@@ -139,6 +140,7 @@ where
             {
                 for socket in self.sockets.values()
                 {
+                    println!("Sending datagram to {:?}: {:?}", socket_addr, datagram);
                     socket.send_to(datagram, socket_addr).expect("send_to failure");
                 }
             }
