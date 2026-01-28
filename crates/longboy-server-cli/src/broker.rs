@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering::SeqCst;
 
 pub struct SessionBroker<const MAX_PLAYERS: usize>
 {
-    receiver_channels: [Receiver<(u32, [u64; 2])>; MAX_PLAYERS],
+    receiver_channels: [Receiver<(u32, u8, u64)>; MAX_PLAYERS],
     broadcast_channel: Sender<(u32, u8, u64)>,
     // thread safe atomic always incrementing session id
     next_session_id: AtomicU64,
@@ -20,13 +20,14 @@ impl<const MAX_PLAYERS: usize> SessionBroker<MAX_PLAYERS>
 {
     pub fn new() -> Self
     {
-        let receiver_channels: [Receiver<(u32, [u64; 2])>; MAX_PLAYERS] =
+        let pipe = flume::unbounded();
+        let receiver_channels: [Receiver<(u32, u8, u64)>; MAX_PLAYERS] =
             [(); MAX_PLAYERS].map(|_| {
-                let (_s, r) = flume::unbounded();
+                let (_s, r) = pipe.clone();
                 r
             });
 
-        let broadcast_channel = flume::unbounded().0;
+        let broadcast_channel = pipe.0;
 
         Self {
             receiver_channels,
@@ -87,7 +88,7 @@ pub struct ClientToServerSink
 
 pub struct ServerToClientSource
 {
-    channel: Receiver<(u32, [u64; 2])>,
+    channel: Receiver<(u32, u8, u64)>,
 }
 
 pub struct ServerBroker<const MAX_PLAYERS: usize>
@@ -180,15 +181,12 @@ impl Source<32> for ServerToClientSource
     {
         match self.channel.try_recv()
         {
-            Ok((frame, player_inputs)) =>
+            Ok((frame, player_id, player_input)) =>
             {
                 *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
-                *(<&mut [u8; 8]>::try_from(&mut buffer[4..12]).unwrap()) = player_inputs[0].to_le_bytes();
-                *(<&mut [u8; 8]>::try_from(&mut buffer[12..20]).unwrap()) = player_inputs[1].to_le_bytes();
-                println!(
-                    "SendFrame({}) PlayerInput0({}) PlayerInput1({})",
-                    frame, player_inputs[0], player_inputs[1]
-                );
+                *(<&mut [u8; 1]>::try_from(&mut buffer[4..5]).unwrap()) = player_id.to_le_bytes();
+                *(<&mut [u8; 8]>::try_from(&mut buffer[5..13]).unwrap()) = player_input.to_le_bytes();
+                println!("Sending Frame({}) PlayerID({}) PlayerInput({})", frame, player_id, player_input);
                 true
             }
             Err(_) => false,

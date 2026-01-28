@@ -11,10 +11,6 @@ use std::{
 
 use anyhow::{Context, Result};
 use config::Config;
-use crossterm::{
-    event::{self, Event, KeyCode, poll},
-    terminal::{disable_raw_mode, enable_raw_mode},
-};
 use longboy::{Client, ClientSession, Sink, Source};
 use longboy_schema::{new_client_to_server_schema, new_server_to_client_schema};
 use quinn::{ClientConfig, Endpoint};
@@ -23,6 +19,8 @@ use rustls::{
     pki_types::{CertificateDer, pem::PemObject},
 };
 use rustls_native_certs::load_native_certs;
+use tokio::{time::sleep};
+use tokio_util::sync::CancellationToken;
 
 #[derive(serde::Deserialize)]
 struct LongboyClientConfig
@@ -34,7 +32,7 @@ struct LongboyClientConfig
 
 struct ServerToClientSink
 {
-    channel: flume::Sender<(u32, [u64; 2])>,
+    channel: flume::Sender<(u32, u8, u64)>,
 }
 
 struct ClientToServerSource
@@ -66,16 +64,14 @@ impl Sink<32> for ServerToClientSink
     fn handle(&mut self, buffer: &[u8; 32])
     {
         let frame = u32::from_le_bytes(*(<&[u8; 4]>::try_from(&buffer[0..4]).unwrap()));
-        let player_input_1 = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[4..12]).unwrap()));
-        let player_input_2 = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[12..20]).unwrap()));
-        self.channel.send((frame, [player_input_1, player_input_2])).unwrap();
+        let player_id = u8::from_le_bytes(*(<&[u8; 1]>::try_from(&buffer[4..5]).unwrap()));
+        let player_input = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[5..13]).unwrap()));
+        self.channel.send((frame, player_id, player_input)).unwrap();
     }
 }
 
 fn main()
 {
-    let _ = enable_raw_mode(); // Enters raw mode
-
     let base_config_dir = std::env::var("LONGBOY_CONFIG_DIR").unwrap_or_else(|_| ".".to_string());
     // Setup the configuration builder for the server. Let environment variables take the highest precedence.
     let settings = Config::builder()
@@ -90,8 +86,6 @@ fn main()
     {
         eprintln!("Error running longboy client: {err:#}");
     }
-
-    let _ = disable_raw_mode(); // Exits raw mode
 }
 
 #[tokio::main]
@@ -151,8 +145,11 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
     // Create longboy client sessions
     let client_session = ClientSession::new(connection).await?;
 
+    // Bind the cancellation token to sigterm handler
+    let cancellation_token = CancellationToken::new();
+
     // Session established, create the longboy client using tokyo runtime.
-    let runtime = longboy::TokioRuntime::new(tokio_util::sync::CancellationToken::new());
+    let runtime = longboy::TokioRuntime::new(cancellation_token.child_token());
     let client_to_server_schema = new_client_to_server_schema();
     let server_to_client_schema = new_server_to_client_schema();
     let receiver_channel = flume::unbounded();
@@ -184,11 +181,15 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
 
             match incoming
             {
-                Ok((frame, [first, second])) =>
+                Ok((frame, player_id, player_input)) =>
                 {
-                    println!("Recv'd Frame({}) ({} ; {})", frame, first, second)
+                    println!("Recv'd Frame({}) PlayerID({}) PlayerInput({})", frame, player_id, player_input);
                 }
-                Err(e) => println!("{}", e),
+                Err(e) => 
+                {
+                    println!("{}", e);
+                    break
+                }
             }
         }
     });
@@ -196,25 +197,18 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
     let mut frame: u32 = 0;
     loop
     {
-        // send keys
-        if poll(Duration::from_millis(10))?
+        if cancellation_token.is_cancelled()
         {
-            if let Event::Key(key_event) = event::read().unwrap()
-            {
-                match key_event.code
-                {
-                    KeyCode::Esc => break,
-                    KeyCode::Char(val) =>
-                    {
-                        print!("Sending Frame({}) {}", frame, val);
-                        let as64 = u64::from(val);
-                        sender_channel.0.send((frame, as64)).unwrap();
-                    }
-                    _ => (),
-                }
-            }
+            break;
         }
+        // send keys
+        sleep(Duration::from_millis(100)).await;
+        // random ascii between 32 and 126
+        let player_input: u64 = rand::random::<u8>() as u64 % (126 - 32) + 32;
+        println!("Sending Frame({}) PlayerInput({})", frame, player_input);
+        sender_channel.0.send((frame, player_input)).unwrap();
         frame += 1;
+        println!("Frame {}", frame);
     }
 
     Ok(())

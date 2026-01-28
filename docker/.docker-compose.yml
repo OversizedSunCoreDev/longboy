@@ -1,5 +1,6 @@
 services:
   server:
+    container_name: longboy_server
     build:
       context: ..
       dockerfile: docker/server.dockerfile
@@ -29,7 +30,7 @@ services:
     tty: true
     command: /bin/bash
     deploy:
-      replicas: 2
+      replicas: 16
 
 networks:
   longboy-network:

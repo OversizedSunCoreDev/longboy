@@ -21,3 +21,5 @@ WORKDIR /tmp/app
 
 COPY --from=sources /tmp/app/certs .
 COPY --from=build /tmp/app/target/debug/longboy-client* .
+
+ENTRYPOINT ["/tmp/app/longboy-client-cli"]
