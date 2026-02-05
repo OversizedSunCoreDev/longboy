@@ -89,7 +89,7 @@ $certStore.Close()
 # Get the RSA private key using the extension method
 $rsaKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($certWithKey)
 
-# Export as PKCS8 format
+# Export as PKCS8 format (required by Rust's PrivateKeyDer::from_pem_file())
 [System.Security.Cryptography.CngKey]$cngKey = $null
 $keyObject = $rsaKey
 if ($keyObject -is [System.Security.Cryptography.RSACng]) {
@@ -97,15 +97,9 @@ if ($keyObject -is [System.Security.Cryptography.RSACng]) {
     $cngKey = $keyObject.Key
     # Export PKCS8 from CNG key
     $keyBytes = $cngKey.Export([System.Security.Cryptography.CngKeyBlobFormat]::Pkcs8PrivateBlob)
-    $keyContent = "-----BEGIN PRIVATE KEY-----`r`n$([Convert]::ToBase64String($keyBytes, 'InsertLineBreaks'))`r`n-----END PRIVATE KEY-----"
 } else {
-    # Fallback for RSA implementations
-    Write-Host "Exporting key as PKCS1 RSA format..."
-    # For systems without ExportPkcs8PrivateKey, we'll use a base64 encoded export
-    # This is a workaround for systems without the newer methods
-    Write-Warning "Using fallback method for private key export"
+    # Fallback for other RSA implementations
     $keyBytes = $rsaKey.Key.Export([System.Security.Cryptography.CngKeyBlobFormat]::Pkcs8PrivateBlob)
-    $keyContent = "-----BEGIN PRIVATE KEY-----`r`n$([Convert]::ToBase64String($keyBytes, 'InsertLineBreaks'))`r`n-----END PRIVATE KEY-----"
 }
 
 $keyBase64 = [Convert]::ToBase64String($keyBytes, 'InsertLineBreaks')

@@ -1,6 +1,27 @@
 {
     "version": "0.2.0",
     "configurations": [
+         {
+            "name": "(Windows) Launch longboy-server-cli",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/longboy-server-cli.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "short"
+                },
+                {
+                    "name": "RUSTC_TOOLCHAIN",
+                    "value": "~/.rustup/toolchains/nightly-aarch64-apple-darwin"
+                }
+            ],
+            "externalConsole": true
+        },
         {
             "type": "cppdbg",
             "request": "launch",
@@ -45,6 +66,10 @@
             "sourceFileMap": {},
             "osx": {
                 "MIMode": "lldb"
+            },
+            "windows": {
+                "MIMode": "gdb",
+                "program": "${workspaceFolder}/target/debug/longboy-server-cli.exe"
             }
         },
         {
@@ -55,6 +80,10 @@
             "processId": "${command:pickProcess}", // Provides a filterable list of running processes
             "osx": {
                 "MIMode": "lldb"
+            },
+            "windows": {
+                "MIMode": "gdb",
+                "program": "${workspaceFolder}/target/debug/longboy-server-cli.exe"
             }
         },
         {
@@ -65,6 +94,10 @@
             "processId": "${command:pickProcess}", // Provides a filterable list of running processes
             "osx": {
                 "MIMode": "lldb"
+            },
+            "windows": {
+                "MIMode": "gdb",
+                "program": "${workspaceFolder}/target/debug/longboy-client-cli.exe"
             }
         }
     ]
