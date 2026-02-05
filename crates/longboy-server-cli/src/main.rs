@@ -105,18 +105,18 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
         let key = if key_path.extension().is_some_and(|x| x == "der")
         {
             PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-                std::fs::read(key_path).context("failed to read private key file")?,
+                std::fs::read(key_path).context("failed to read private key file").unwrap(),
             ))
         }
         else
         {
-            PrivateKeyDer::from_pem_file(key_path).context("failed to read PEM from private key file")?
+            PrivateKeyDer::from_pem_file(key_path).context("failed to read PEM from private key file").unwrap()
         };
 
         let cert_chain = if cert_path.extension().is_some_and(|x| x == "der")
         {
             vec![CertificateDer::from(
-                std::fs::read(cert_path).context("failed to read certificate chain file")?,
+                std::fs::read(cert_path).context("failed to read certificate chain file").unwrap(),
             )]
         }
         else
@@ -124,7 +124,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
             CertificateDer::pem_file_iter(cert_path)
                 .context("failed to read PEM from certificate chain file")?
                 .collect::<Result<_, _>>()
-                .context("invalid PEM-encoded certificate")?
+                .context("invalid PEM-encoded certificate").unwrap()
         };
 
         (cert_chain, key)

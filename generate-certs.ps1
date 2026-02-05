@@ -59,8 +59,10 @@ Write-Host "`n[4/5] Exporting Root CA to PEM format..."
 $rootCAPath = Join-Path $OutputPath "rootCA.pem"
 $rootCABytes = $rootCA.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
 $rootCABase64 = [Convert]::ToBase64String($rootCABytes, 'InsertLineBreaks')
-$rootCAContent = "-----BEGIN CERTIFICATE-----`r`n$rootCABase64`r`n-----END CERTIFICATE-----"
-Set-Content -Path $rootCAPath -Value $rootCAContent -Encoding UTF8
+$rootCAContent = "-----BEGIN CERTIFICATE-----`n$rootCABase64`n-----END CERTIFICATE-----"
+# Use UTF8 without BOM for Rust compatibility
+$utf8NoBOM = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($rootCAPath, $rootCAContent, $utf8NoBOM)
 
 Write-Host "Root CA saved to: $rootCAPath"
 
@@ -71,8 +73,10 @@ Write-Host "`n[5/5] Exporting server certificate and private key to PEM format..
 $certPath = Join-Path $OutputPath "localhost.crt"
 $certBytes = $signedCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
 $certBase64 = [Convert]::ToBase64String($certBytes, 'InsertLineBreaks')
-$certContent = "-----BEGIN CERTIFICATE-----`r`n$certBase64`r`n-----END CERTIFICATE-----"
-Set-Content -Path $certPath -Value $certContent -Encoding UTF8
+$certContent = "-----BEGIN CERTIFICATE-----`n$certBase64`n-----END CERTIFICATE-----"
+# Use UTF8 without BOM for Rust compatibility
+$utf8NoBOM = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($certPath, $certContent, $utf8NoBOM)
 
 Write-Host "Certificate saved to: $certPath"
 
@@ -103,8 +107,10 @@ if ($keyObject -is [System.Security.Cryptography.RSACng]) {
 }
 
 $keyBase64 = [Convert]::ToBase64String($keyBytes, 'InsertLineBreaks')
-$keyContent = "-----BEGIN PRIVATE KEY-----`r`n$keyBase64`r`n-----END PRIVATE KEY-----"
-Set-Content -Path $keyPath -Value $keyContent -Encoding UTF8
+$keyContent = "-----BEGIN PRIVATE KEY-----`n$keyBase64`n-----END PRIVATE KEY-----"
+# Use UTF8 without BOM for Rust compatibility
+$utf8NoBOM = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($keyPath, $keyContent, $utf8NoBOM)
 
 Write-Host "Private key saved to: $keyPath"
 
