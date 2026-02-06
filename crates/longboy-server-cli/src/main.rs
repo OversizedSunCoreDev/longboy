@@ -96,7 +96,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     let server_builder = Server::builder(config.session_capacity, server_runtime)
         .sender::<_, 32, 3>(&server_to_client_schema, server_broker)
         .unwrap()
-        .receiver::<_, 16, 3>(&client_to_server_schema, client_broker)
+        .receiver::<_, 28, 1>(&client_to_server_schema, client_broker)
         .unwrap();
 
     // Load TLS certificates. TLS is required.

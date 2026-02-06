@@ -5,6 +5,7 @@ use enum_map::{Enum, EnumMap};
 use flume::Receiver as FlumeReceiver;
 use fnv::FnvHashMap;
 use thunderdome::{Arena, Index};
+use tracing::{info, warn};
 
 use crate::{Constants, Factory, Mirroring, Receiver, RuntimeTask, ServerSessionEvent, Sink};
 
@@ -146,11 +147,18 @@ where
         {
             if len != std::mem::size_of::<u64>() + std::mem::size_of::<u8>()
             {
+                warn!(
+                    "Received mapping of invalid length {} from socket_addr {:?}",
+                    len, socket_addr
+                );
                 continue;
             }
 
             let session_id = u64::from_le_bytes(*<&[u8; 8]>::try_from(&buffer[0..8]).unwrap());
-
+            info!(
+                "Received mapping from session_id {} to socket_addr {:?}",
+                session_id, socket_addr
+            );
             let mirroring = buffer[8] as usize;
 
             if mirroring >= Mirroring::LENGTH
@@ -187,9 +195,14 @@ where
         {
             if len != DATAGRAM_SIZE
             {
+                warn!(
+                    "Received datagram of invalid length {} from socket_addr {:?}",
+                    len, socket_addr
+                );
                 continue;
             }
             let datagram = (&mut buffer[0..DATAGRAM_SIZE]).try_into().unwrap();
+            info!("Received datagram from socket_addr {:?} - datagram {:?}", socket_addr, datagram);
 
             if let Some(index) = self.socket_addr_to_session_map.get(&socket_addr)
             {

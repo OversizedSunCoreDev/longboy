@@ -142,9 +142,9 @@ impl<const MAX_PLAYERS: usize> Factory for ClientBroker<MAX_PLAYERS>
     }
 }
 
-impl Sink<16> for ClientToServerSink
+impl Sink<28> for ClientToServerSink
 {
-    fn handle(&mut self, buffer: &[u8; 16])
+    fn handle(&mut self, buffer: &[u8; 28])
     {
         let frame = u32::from_le_bytes(*(<&[u8; 4]>::try_from(&buffer[0..4]).unwrap()));
         let player_input = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[4..12]).unwrap()));
