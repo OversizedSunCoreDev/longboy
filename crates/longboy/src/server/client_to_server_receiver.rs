@@ -126,6 +126,7 @@ where
 
         // Update Client socket addresses.
         let mut buffer = [0; 64];
+        // TODO: This accepts anything, even those which are not mapped, no session is established, and there is no signed header.
         while let Ok((len, socket_addr)) = self.mapper_socket.recv_from(&mut buffer)
         {
             println!("Received mapper datagram from {:?}, length {}", socket_addr, len);
@@ -165,6 +166,7 @@ where
         }
 
         // Process datagrams.
+        // TODO: This accepts anything, even those which are not mapped, no session is established, and there is no signed header.
         let mut buffer = [0; 512];
         while let Ok((len, socket_addr)) = self.socket.recv_from(&mut buffer)
         {
