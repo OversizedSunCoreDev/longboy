@@ -11,8 +11,8 @@ pub use self::{factory::*, server_session::*};
 pub(crate) use self::{client_to_server_receiver::*, server_session_event::*, server_to_client_sender::*};
 
 use crate::{ClientToServerSchema, Constants, Mirroring, Runtime, RuntimeTask, ServerToClientSchema, Sink, Source};
-use anyhow::{anyhow, Context, Result};
-use enum_map::{enum_map, EnumMap};
+use anyhow::{Context, Result, anyhow};
+use enum_map::{EnumMap, enum_map};
 use flume::Sender as FlumeSender;
 use fnv::{FnvHashMap, FnvHashSet};
 use std::net::{SocketAddr, UdpSocket};
@@ -155,7 +155,7 @@ impl ServerBuilder
         let mapper_socket =
             UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], schema.mapper_port))).context(schema.name)?;
 
-        let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).context(schema.name)?;
+        let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], schema.port))).context(schema.name)?;
 
         self.receiver_with_socket::<SinkFactoryType, SIZE, WINDOW_SIZE>(schema, mapper_socket, socket, sink_factory)
     }
@@ -185,8 +185,8 @@ impl ServerBuilder
         {
             return Err(anyhow!(
                 "Schema's `port` does not match Socket port: {} vs {}",
-                schema.mapper_port,
-                mapper_socket.local_addr().unwrap().port()
+                schema.port,
+                socket.local_addr().unwrap().port()
             ))
             .context(schema.name);
         }

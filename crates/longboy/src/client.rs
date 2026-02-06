@@ -9,8 +9,8 @@ pub use self::client_session::*;
 pub(crate) use self::{client_to_server_sender::*, server_to_client_receiver::*};
 
 use crate::{ClientToServerSchema, Constants, Mirroring, Runtime, RuntimeTask, ServerToClientSchema, Sink, Source};
-use anyhow::{anyhow, Context, Result};
-use enum_map::{enum_map, EnumMap};
+use anyhow::{Context, Result, anyhow};
+use enum_map::{EnumMap, enum_map};
 use fnv::FnvHashSet;
 use std::net::{SocketAddr, UdpSocket};
 
