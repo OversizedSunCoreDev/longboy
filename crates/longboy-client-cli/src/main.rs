@@ -3,11 +3,7 @@
 #![feature(generic_const_items)]
 #![feature(unboxed_closures)]
 
-use std::{
-    net::SocketAddr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use config::Config;
@@ -19,7 +15,7 @@ use rustls::{
     pki_types::{CertificateDer, pem::PemObject},
 };
 use rustls_native_certs::load_native_certs;
-use tokio::{time::sleep};
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 #[derive(serde::Deserialize)]
@@ -183,12 +179,15 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
             {
                 Ok((frame, player_id, player_input)) =>
                 {
-                    println!("Recv'd Frame({}) PlayerID({}) PlayerInput({})", frame, player_id, player_input);
+                    println!(
+                        "Recv'd Frame({}) PlayerID({}) PlayerInput({})",
+                        frame, player_id, player_input
+                    );
                 }
-                Err(e) => 
+                Err(e) =>
                 {
                     println!("{}", e);
-                    break
+                    break;
                 }
             }
         }

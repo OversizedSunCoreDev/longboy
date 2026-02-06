@@ -34,6 +34,31 @@ where
     sender: Sender<SourceType, SIZE, WINDOW_SIZE>,
 }
 
+impl<SourceFactoryType, const SIZE: usize, const WINDOW_SIZE: usize> std::fmt::Debug
+    for ServerToClientSender<SourceFactoryType, SIZE, WINDOW_SIZE>
+where
+    SourceFactoryType: Factory<Type: Source<SIZE>>,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::DATAGRAM_SIZE]:,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        f.debug_struct("ServerToClientSender")
+            .field("name", &self.name)
+            .field("mapper_socket", &self.mapper_socket)
+            .field("sockets", &self.sockets)
+            .field("session_receiver", &"FlumeReceiver<ServerSessionEvent>")
+            .field(
+                "sessions",
+                &format!(
+                    "Arena<SenderSession<{}, {}, {}>>",
+                    "SourceFactoryType::Type", SIZE, WINDOW_SIZE
+                ),
+            )
+            .field("session_id_to_session_map", &self.session_id_to_session_map)
+            .finish()
+    }
+}
+
 impl<SourceFactoryType, const SIZE: usize, const WINDOW_SIZE: usize>
     ServerToClientSender<SourceFactoryType, SIZE, WINDOW_SIZE>
 where
@@ -73,22 +98,10 @@ where
             source_factory,
         })
     }
-}
 
-impl<SourceFactoryType, const SIZE: usize, const WINDOW_SIZE: usize> RuntimeTask
-    for ServerToClientSender<SourceFactoryType, SIZE, WINDOW_SIZE>
-where
-    SourceFactoryType: Factory<Type: Source<SIZE>>,
-    [(); <Constants<SIZE, WINDOW_SIZE>>::DATAGRAM_SIZE]:,
-{
-    fn name(&self) -> &str
+    #[tracing::instrument(skip(self))]
+    fn poll_server_session_events(&mut self, timestamp: u16)
     {
-        &self.name
-    }
-
-    fn poll(&mut self, timestamp: u16)
-    {
-        // Handle Session changes.
         for event in self.session_receiver.try_iter()
         {
             match event
@@ -113,7 +126,11 @@ where
                 }
             }
         }
+    }
 
+    #[tracing::instrument(skip(self))]
+    fn poll_for_client_socket_addresses(&mut self)
+    {
         // Update Client socket addresses.
         let mut buffer = [0; 64];
         while let Ok((len, socket_addr)) = self.mapper_socket.recv_from(&mut buffer)
@@ -124,14 +141,17 @@ where
             }
 
             let session_id = u64::from_le_bytes(*<&[u8; 8]>::try_from(&buffer[0..8]).unwrap());
-            println!("Received heartbeat from session_id {}, socket_addr {:?}", session_id, socket_addr);
 
             if let Some(index) = self.session_id_to_session_map.get(&session_id)
             {
                 self.sessions[*index].socket_addr = Some(socket_addr);
             }
         }
+    }
 
+    #[tracing::instrument(skip(self))]
+    fn poll_sessions(&mut self, timestamp: u16)
+    {
         // Poll Sessions
         for (_, session) in self.sessions.iter_mut()
         {
@@ -140,10 +160,28 @@ where
             {
                 for socket in self.sockets.values()
                 {
-                    println!("Sending datagram to {:?}: {:?}", socket_addr, datagram);
                     socket.send_to(datagram, socket_addr).expect("send_to failure");
                 }
             }
         }
+    }
+}
+
+impl<SourceFactoryType, const SIZE: usize, const WINDOW_SIZE: usize> RuntimeTask
+    for ServerToClientSender<SourceFactoryType, SIZE, WINDOW_SIZE>
+where
+    SourceFactoryType: Factory<Type: Source<SIZE>>,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::DATAGRAM_SIZE]:,
+{
+    fn name(&self) -> &str
+    {
+        &self.name
+    }
+
+    fn poll(&mut self, timestamp: u16)
+    {
+        self.poll_server_session_events(timestamp);
+        self.poll_for_client_socket_addresses();
+        self.poll_sessions(timestamp);
     }
 }

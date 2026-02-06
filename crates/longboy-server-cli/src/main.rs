@@ -13,6 +13,8 @@ use rustls::{
     crypto::{CryptoProvider, aws_lc_rs},
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject},
 };
+use tracing::{error, info, warn};
+use tracing_subscriber::fmt::format::FmtSpan;
 use std::{net::SocketAddr, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
@@ -44,6 +46,12 @@ struct LongboyServerConfig
 /// This function collects configuration settings and starts the server.
 fn main()
 {
+    //Setup a simple tracer subscriber for logging.
+    tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::FULL)
+        .with_max_level(tracing::Level::TRACE)
+        .init();
+
     let base_config_dir = std::env::var("LONGBOY_CONFIG_DIR").unwrap_or_else(|_| ".".to_string());
     // Setup the configuration builder for the server. Let environment variables take the highest precedence.
     let settings = Config::builder()
@@ -86,14 +94,10 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     let client_to_server_schema = new_client_to_server_schema();
 
     let server_builder = Server::builder(config.session_capacity, server_runtime)
-        .sender::<_, 32, 3>(
-            &server_to_client_schema,
-            server_broker
-        ).unwrap()
-        .receiver::<_, 16, 3>(
-            &client_to_server_schema,
-            client_broker
-        ).unwrap();
+        .sender::<_, 32, 3>(&server_to_client_schema, server_broker)
+        .unwrap()
+        .receiver::<_, 16, 3>(&client_to_server_schema, client_broker)
+        .unwrap();
 
     // Load TLS certificates. TLS is required.
     let provider = aws_lc_rs::default_provider();
@@ -105,18 +109,24 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
         let key = if key_path.extension().is_some_and(|x| x == "der")
         {
             PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-                std::fs::read(key_path).context("failed to read private key file").unwrap(),
+                std::fs::read(key_path)
+                    .context("failed to read private key file")
+                    .unwrap(),
             ))
         }
         else
         {
-            PrivateKeyDer::from_pem_file(key_path).context("failed to read PEM from private key file").unwrap()
+            PrivateKeyDer::from_pem_file(key_path)
+                .context("failed to read PEM from private key file")
+                .unwrap()
         };
 
         let cert_chain = if cert_path.extension().is_some_and(|x| x == "der")
         {
             vec![CertificateDer::from(
-                std::fs::read(cert_path).context("failed to read certificate chain file").unwrap(),
+                std::fs::read(cert_path)
+                    .context("failed to read certificate chain file")
+                    .unwrap(),
             )]
         }
         else
@@ -124,7 +134,8 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
             CertificateDer::pem_file_iter(cert_path)
                 .context("failed to read PEM from certificate chain file")?
                 .collect::<Result<_, _>>()
-                .context("invalid PEM-encoded certificate").unwrap()
+                .context("invalid PEM-encoded certificate")
+                .unwrap()
         };
 
         (cert_chain, key)
@@ -144,23 +155,22 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     let mut server_instance = server_builder.build();
 
     // log out some info on server startup
-    println!("Longboy server listening on {}", listen_addr);
+    info!("Longboy server listening on {}", listen_addr);
     // print stats from server endpoint
-    println!("Server endpoint stats: {:?}", server_endpoint.stats());
-
+    info!("Server endpoint stats: {:?}", server_endpoint.stats());
 
     // start accepting connections
     while let Some(conn) = server_endpoint.accept().await
     {
         // print it
-        println!("Incoming connection: {:?}", conn.remote_address());
+        info!("Incoming connection: {:?}", conn.remote_address());
 
         // try to accept and handle errors gracefully
         match conn.accept()
         {
             Err(e) =>
             {
-                println!("Failed to accept connection: {:?}", e);
+                error!("Failed to accept connection: {:?}", e);
                 continue;
             }
             Ok(connecting) =>
@@ -169,7 +179,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
                 {
                     Err(e) =>
                     {
-                        println!("Failed to establish connection: {:?}", e);
+                        warn!("Failed to establish connection: {:?}", e);
                         continue;
                     }
                     Ok(connection) =>
@@ -177,7 +187,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
                         // handle the connection
                         if let Err(e) = server_handle_connection(connection, &mut server_instance, &broker).await
                         {
-                            println!("Error handling connection: {:?}", e);
+                            warn!("Error handling connection: {:?}", e);
                         }
                     }
                 }
@@ -188,10 +198,14 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     Ok(())
 }
 
-async fn server_handle_connection(conn: Connection, server: &mut Server, broker: &std::sync::Arc<SessionBroker<32>>) -> Result<()>
+async fn server_handle_connection(
+    conn: Connection,
+    server: &mut Server,
+    broker: &std::sync::Arc<SessionBroker<32>>,
+) -> Result<()>
 {
     let remote_address = conn.remote_address();
-    println!("New connection from {}", remote_address);
+    info!("New connection from {}", remote_address);
 
     let player_index = broker.next_player_index()?;
     let session_id = broker.allocate_session_id(player_index);

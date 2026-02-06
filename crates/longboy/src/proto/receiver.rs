@@ -42,6 +42,7 @@ where
         self.cycle
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn handle_datagram(
         &mut self,
         timestamp: u16,
@@ -60,11 +61,10 @@ where
         let datagram_cycle = u16::from_le_bytes(*<&[u8; 2]>::try_from(&datagram[0..2]).unwrap()) as usize;
         let datagram_timestamp = u16::from_le_bytes(*<&[u8; 2]>::try_from(&datagram[2..4]).unwrap());
 
-        println!("Received datagram with cycle {} and timestamp {}, my cycle is {} and my timestamp is {}", datagram_cycle, datagram_timestamp, self.cycle, timestamp);
-
         // Calculate diff for cycle and timestamp.
         let cycle_diff = ((datagram_cycle + MAX_CYCLE) - self.cycle) % MAX_CYCLE;
-        let timestamp_diff = (((datagram_timestamp as u32 + u16::MAX as u32) - timestamp as u32) % (u16::MAX as u32)) as u16;
+        let timestamp_diff =
+            (((datagram_timestamp as u32 + u16::MAX as u32) - timestamp as u32) % (u16::MAX as u32)) as u16;
 
         // Check for bad datagrams or late datagrams that are already processed.  Because
         // we ensure only a positive diff, this is done by checking for any values greater

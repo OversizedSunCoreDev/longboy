@@ -90,7 +90,6 @@ where
         let mut buffer = [0; 512];
         while let Ok((len, _)) = self.socket.recv_from(&mut buffer)
         {
-            println!("Received datagram of length {}", len);
             if len != DATAGRAM_SIZE
             {
                 continue;

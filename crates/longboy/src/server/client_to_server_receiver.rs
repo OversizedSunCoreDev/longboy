@@ -37,6 +37,33 @@ where
     receiver: Receiver<SinkType, SIZE, WINDOW_SIZE>,
 }
 
+impl<SinkFactoryType, const SIZE: usize, const WINDOW_SIZE: usize> std::fmt::Debug
+    for ClientToServerReceiver<SinkFactoryType, SIZE, WINDOW_SIZE>
+where
+    SinkFactoryType: Factory<Type: Sink<SIZE>>,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::DATAGRAM_SIZE]:,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::MAX_BUFFERED]:,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        f.debug_struct("ClientToServerReceiver")
+            .field("name", &self.name)
+            .field("mapper_socket", &self.mapper_socket)
+            .field("socket", &self.socket)
+            .field("session_receiver", &"FlumeReceiver<ServerSessionEvent>")
+            .field(
+                "sessions",
+                &format!(
+                    "Arena<ReceiverSession<{}, {}, {}>>",
+                    "SinkFactoryType::Type", SIZE, WINDOW_SIZE
+                ),
+            )
+            .field("session_id_to_session_map", &self.session_id_to_session_map)
+            .field("socket_addr_to_session_map", &self.socket_addr_to_session_map)
+            .finish()
+    }
+}
+
 impl<SinkFactoryType, const SIZE: usize, const WINDOW_SIZE: usize>
     ClientToServerReceiver<SinkFactoryType, SIZE, WINDOW_SIZE>
 where
@@ -74,26 +101,10 @@ where
             sink_factory,
         })
     }
-}
 
-impl<SinkFactoryType, const SIZE: usize, const WINDOW_SIZE: usize> RuntimeTask
-    for ClientToServerReceiver<SinkFactoryType, SIZE, WINDOW_SIZE>
-where
-    SinkFactoryType: Factory<Type: Sink<SIZE>>,
-    [(); <Constants<SIZE, WINDOW_SIZE>>::DATAGRAM_SIZE]:,
-    [(); <Constants<SIZE, WINDOW_SIZE>>::MAX_BUFFERED]:,
-{
-    fn name(&self) -> &str
+    #[tracing::instrument(skip(self))]
+    fn poll_server_session_events(&mut self, timestamp: u16)
     {
-        &self.name
-    }
-
-    fn poll(&mut self, timestamp: u16)
-    {
-        // Alias constants so they're less painful to read.
-        #[allow(non_snake_case)]
-        let DATAGRAM_SIZE: usize = Constants::<SIZE, WINDOW_SIZE>::DATAGRAM_SIZE;
-
         // Handle Session changes.
         for event in self.session_receiver.try_iter()
         {
@@ -123,13 +134,16 @@ where
                 }
             }
         }
+    }
 
+    #[tracing::instrument(skip(self))]
+    fn poll_for_client_socket_addresses(&mut self)
+    {
         // Update Client socket addresses.
         let mut buffer = [0; 64];
         // TODO: This accepts anything, even those which are not mapped, no session is established, and there is no signed header.
         while let Ok((len, socket_addr)) = self.mapper_socket.recv_from(&mut buffer)
         {
-            println!("Received mapper datagram from {:?}, length {}", socket_addr, len);
             if len != std::mem::size_of::<u64>() + std::mem::size_of::<u8>()
             {
                 continue;
@@ -139,12 +153,6 @@ where
 
             let mirroring = buffer[8] as usize;
 
-            println!(
-                "Mapping session_id {} mirroring {} to socket_addr {:?}",
-                session_id,
-                mirroring,
-                socket_addr
-            );
             if mirroring >= Mirroring::LENGTH
             {
                 continue;
@@ -164,13 +172,19 @@ where
                 self.socket_addr_to_session_map.insert(socket_addr, *index);
             }
         }
+    }
 
-        // Process datagrams.
+    #[tracing::instrument(skip(self))]
+    fn poll_for_client_datagrams(&mut self, timestamp: u16)
+    {
+        // Alias constants so they're less painful to read.
+        #[allow(non_snake_case)]
+        let DATAGRAM_SIZE: usize = Constants::<SIZE, WINDOW_SIZE>::DATAGRAM_SIZE;
+
         // TODO: This accepts anything, even those which are not mapped, no session is established, and there is no signed header.
         let mut buffer = [0; 512];
         while let Ok((len, socket_addr)) = self.socket.recv_from(&mut buffer)
         {
-            println!("Received datagram from {:?}, length {}", socket_addr, len);
             if len != DATAGRAM_SIZE
             {
                 continue;
@@ -186,5 +200,25 @@ where
                     .handle_datagram(timestamp, datagram);
             }
         }
+    }
+}
+
+impl<SinkFactoryType, const SIZE: usize, const WINDOW_SIZE: usize> RuntimeTask
+    for ClientToServerReceiver<SinkFactoryType, SIZE, WINDOW_SIZE>
+where
+    SinkFactoryType: Factory<Type: Sink<SIZE>>,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::DATAGRAM_SIZE]:,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::MAX_BUFFERED]:,
+{
+    fn name(&self) -> &str
+    {
+        &self.name
+    }
+
+    fn poll(&mut self, timestamp: u16)
+    {
+        self.poll_server_session_events(timestamp);
+        self.poll_for_client_socket_addresses();
+        self.poll_for_client_datagrams(timestamp);
     }
 }

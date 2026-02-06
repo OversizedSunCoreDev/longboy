@@ -1,8 +1,14 @@
+use anyhow::Result;
 use flume::{Receiver, Sender};
 use longboy::{Factory, Sink, Source};
-use std::{collections::HashMap, sync::{Arc, RwLock, atomic::{AtomicU64}}};
-use anyhow::{Result};
-use std::sync::atomic::Ordering::SeqCst;
+use tracing::info;
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicU64, Ordering::SeqCst},
+    },
+};
 
 pub struct SessionBroker<const MAX_PLAYERS: usize>
 {
@@ -13,7 +19,7 @@ pub struct SessionBroker<const MAX_PLAYERS: usize>
     // key is the session id, value is the player index
     player_sessions: Arc<RwLock<HashMap<u64, usize>>>,
     // thread safe atomic free pointer to the next player index
-    player_index_free_list: Arc<RwLock<Vec<bool>>>, 
+    player_index_free_list: Arc<RwLock<Vec<bool>>>,
 }
 
 impl<const MAX_PLAYERS: usize> SessionBroker<MAX_PLAYERS>
@@ -21,11 +27,10 @@ impl<const MAX_PLAYERS: usize> SessionBroker<MAX_PLAYERS>
     pub fn new() -> Self
     {
         let pipe = flume::unbounded();
-        let receiver_channels: [Receiver<(u32, u8, u64)>; MAX_PLAYERS] =
-            [(); MAX_PLAYERS].map(|_| {
-                let (_s, r) = pipe.clone();
-                r
-            });
+        let receiver_channels: [Receiver<(u32, u8, u64)>; MAX_PLAYERS] = [(); MAX_PLAYERS].map(|_| {
+            let (_s, r) = pipe.clone();
+            r
+        });
 
         let broadcast_channel = pipe.0;
 
@@ -44,8 +49,11 @@ impl<const MAX_PLAYERS: usize> SessionBroker<MAX_PLAYERS>
         let insert = self.player_sessions.write().unwrap().insert(session_id, player_index);
         match insert
         {
-            Some(old_player_index) => println!("Warning: Overwriting existing session {} for player index {} with {}", old_player_index, player_index, session_id),
-            None => println!("Allocated session id {} for player index {}", session_id, player_index),
+            Some(old_player_index) => info!(
+                "Warning: Overwriting existing session {} for player index {} with {}",
+                old_player_index, player_index, session_id
+            ),
+            None => info!("Allocated session id {} for player index {}", session_id, player_index),
         }
         session_id
     }
@@ -64,21 +72,7 @@ impl<const MAX_PLAYERS: usize> SessionBroker<MAX_PLAYERS>
             None => anyhow::bail!("Maximum number of players reached"),
         }
     }
-
-    // pub fn free_player_index(&self, player_index: usize)
-    // {
-    //     let mut free_list = self.player_index_free_list.write().unwrap();
-    //     free_list[player_index] = true;
-    //     let mut sessions = self.player_sessions.write().unwrap();
-    //     let session_id = sessions.iter().find_map(|(&s_id, &p_index)| if p_index == player_index { Some(s_id) } else { None });
-    //     if let Some(s_id) = session_id
-    //     {
-    //         sessions.remove(&s_id);
-    //         println!("Freed session id {} for player index {}", s_id, player_index);
-    //     }
-    // }
 }
-
 
 pub struct ClientToServerSink
 {
@@ -100,9 +94,7 @@ impl<const MAX_PLAYERS: usize> ServerBroker<MAX_PLAYERS>
 {
     pub fn new(session_broker: Arc<SessionBroker<MAX_PLAYERS>>) -> Self
     {
-        Self {
-            inner: session_broker,
-        }
+        Self { inner: session_broker }
     }
 }
 
@@ -112,14 +104,8 @@ impl<const MAX_PLAYERS: usize> Factory for ServerBroker<MAX_PLAYERS>
 
     fn invoke(&mut self, session_id: u64) -> Self::Type
     {
-        let binding = self
-            .inner
-            .player_sessions
-            .read()
-            .unwrap();
-        let player_index = binding
-            .get(&session_id)
-            .expect("Unknown Session ID");
+        let binding = self.inner.player_sessions.read().unwrap();
+        let player_index = binding.get(&session_id).expect("Unknown Session ID");
 
         ServerToClientSource {
             channel: self.inner.receiver_channels[*player_index].clone(),
@@ -136,9 +122,7 @@ impl<const MAX_PLAYERS: usize> ClientBroker<MAX_PLAYERS>
 {
     pub fn new(session_broker: Arc<SessionBroker<MAX_PLAYERS>>) -> Self
     {
-        Self {
-            inner: session_broker,
-        }
+        Self { inner: session_broker }
     }
 }
 
@@ -148,14 +132,8 @@ impl<const MAX_PLAYERS: usize> Factory for ClientBroker<MAX_PLAYERS>
 
     fn invoke(&mut self, session_id: u64) -> Self::Type
     {
-        let binding = self
-            .inner
-            .player_sessions
-            .read()
-            .unwrap();
-        let player_index = binding
-            .get(&session_id)
-            .expect("Unknown Session ID");
+        let binding = self.inner.player_sessions.read().unwrap();
+        let player_index = binding.get(&session_id).expect("Unknown Session ID");
 
         ClientToServerSink {
             player_index: *player_index as u8,
@@ -170,7 +148,6 @@ impl Sink<16> for ClientToServerSink
     {
         let frame = u32::from_le_bytes(*(<&[u8; 4]>::try_from(&buffer[0..4]).unwrap()));
         let player_input = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[4..12]).unwrap()));
-        println!("Recv'd Frame({}) PlayerInput({})", frame, player_input);
         self.channel.send((frame, self.player_index, player_input)).unwrap();
     }
 }
@@ -186,7 +163,6 @@ impl Source<32> for ServerToClientSource
                 *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
                 *(<&mut [u8; 1]>::try_from(&mut buffer[4..5]).unwrap()) = player_id.to_le_bytes();
                 *(<&mut [u8; 8]>::try_from(&mut buffer[5..13]).unwrap()) = player_input.to_le_bytes();
-                println!("Sending Frame({}) PlayerID({}) PlayerInput({})", frame, player_id, player_input);
                 true
             }
             Err(_) => false,
