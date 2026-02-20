@@ -12,8 +12,8 @@ use std::{
 
 pub struct SessionBroker<const MAX_PLAYERS: usize>
 {
-    receiver_channels: [Receiver<(u32, u8, u64)>; MAX_PLAYERS],
-    broadcast_channel: Sender<(u32, u8, u64)>,
+    receiver_channels: [Receiver<(u64, u64, u64, u8)>; MAX_PLAYERS],
+    broadcast_channel: Sender<(u64, u64, u64, u8)>,
     // thread safe atomic always incrementing session id
     next_session_id: AtomicU64,
     // key is the session id, value is the player index
@@ -27,7 +27,7 @@ impl<const MAX_PLAYERS: usize> SessionBroker<MAX_PLAYERS>
     pub fn new() -> Self
     {
         let pipe = flume::unbounded();
-        let receiver_channels: [Receiver<(u32, u8, u64)>; MAX_PLAYERS] = [(); MAX_PLAYERS].map(|_| {
+        let receiver_channels: [Receiver<(u64, u64, u64, u8)>; MAX_PLAYERS] = [(); MAX_PLAYERS].map(|_| {
             let (_s, r) = pipe.clone();
             r
         });
@@ -77,12 +77,12 @@ impl<const MAX_PLAYERS: usize> SessionBroker<MAX_PLAYERS>
 pub struct ClientToServerSink
 {
     player_index: u8,
-    channel: Sender<(u32, u8, u64)>,
+    channel: Sender<(u64, u64, u64, u8)>,
 }
 
 pub struct ServerToClientSource
 {
-    channel: Receiver<(u32, u8, u64)>,
+    channel: Receiver<(u64, u64, u64, u8)>,
 }
 
 pub struct ServerBroker<const MAX_PLAYERS: usize>
@@ -144,25 +144,29 @@ impl<const MAX_PLAYERS: usize> Factory for ClientBroker<MAX_PLAYERS>
 
 impl Sink<28> for ClientToServerSink
 {
+    #[tracing::instrument(skip(self))]
     fn handle(&mut self, buffer: &[u8; 28])
     {
-        let frame = u32::from_le_bytes(*(<&[u8; 4]>::try_from(&buffer[0..4]).unwrap()));
-        let player_input = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[4..12]).unwrap()));
-        self.channel.send((frame, self.player_index, player_input)).unwrap();
+        let a = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[0..8]).unwrap()));
+        let b = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[8..16]).unwrap()));
+        let c = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[16..24]).unwrap()));
+        self.channel.send((a, b, c, self.player_index)).unwrap();
     }
 }
 
-impl Source<32> for ServerToClientSource
+impl Source<28> for ServerToClientSource
 {
-    fn poll(&mut self, buffer: &mut [u8; 32]) -> bool
+    #[tracing::instrument(skip(self))]
+    fn poll(&mut self, buffer: &mut [u8; 28]) -> bool
     {
         match self.channel.try_recv()
         {
-            Ok((frame, player_id, player_input)) =>
+            Ok((a, b, c, player_index)) =>
             {
-                *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
-                *(<&mut [u8; 1]>::try_from(&mut buffer[4..5]).unwrap()) = player_id.to_le_bytes();
-                *(<&mut [u8; 8]>::try_from(&mut buffer[5..13]).unwrap()) = player_input.to_le_bytes();
+                *(<&mut [u8; 8]>::try_from(&mut buffer[0..8]).unwrap()) = a.to_le_bytes();
+                *(<&mut [u8; 8]>::try_from(&mut buffer[8..16]).unwrap()) = b.to_le_bytes();
+                *(<&mut [u8; 8]>::try_from(&mut buffer[16..24]).unwrap()) = c.to_le_bytes();
+                *(<&mut [u8; 1]>::try_from(&mut buffer[24..25]).unwrap()) = player_index.to_le_bytes();
                 true
             }
             Err(_) => false,

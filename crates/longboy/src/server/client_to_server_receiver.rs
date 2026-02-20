@@ -103,8 +103,7 @@ where
         })
     }
 
-    #[tracing::instrument(skip(self))]
-    fn poll_server_session_events(&mut self, timestamp: u16)
+    fn poll_server_session_events(&mut self, _timestamp: u16)
     {
         // Handle Session changes.
         for event in self.session_receiver.try_iter()
@@ -137,7 +136,6 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self))]
     fn poll_for_client_socket_addresses(&mut self)
     {
         // Update Client socket addresses.
@@ -145,7 +143,7 @@ where
         // TODO: This accepts anything, even those which are not mapped, no session is established, and there is no signed header.
         while let Ok((len, socket_addr)) = self.mapper_socket.recv_from(&mut buffer)
         {
-            if len != std::mem::size_of::<u64>() + std::mem::size_of::<u8>()
+            if len < std::mem::size_of::<u64>() + std::mem::size_of::<u8>() // disqualify not enough data?
             {
                 warn!(
                     "Received mapping of invalid length {} from socket_addr {:?}",
@@ -173,16 +171,17 @@ where
 
                 if let Some(socket_addr) = session.socket_addrs[mirroring]
                 {
+                    info!("Removing old mapping from session_id {} to socket_addr {:?} for mirroring {:?}", session_id, socket_addr, mirroring);
                     self.socket_addr_to_session_map.remove(&socket_addr);
                 }
 
+                info!("Adding mapping from session_id {} to socket_addr {:?} for mirroring {:?}", session_id, socket_addr, mirroring);
                 session.socket_addrs[mirroring] = Some(socket_addr);
                 self.socket_addr_to_session_map.insert(socket_addr, *index);
             }
         }
     }
 
-    #[tracing::instrument(skip(self))]
     fn poll_for_client_datagrams(&mut self, timestamp: u16)
     {
         // Alias constants so they're less painful to read.

@@ -28,26 +28,27 @@ struct LongboyClientConfig
 
 struct ServerToClientSink
 {
-    channel: flume::Sender<(u32, u8, u64)>,
+    channel: flume::Sender<(u64, u64, u64, u8)>,
 }
 
 struct ClientToServerSource
 {
-    channel: flume::Receiver<(u32, u64)>,
+    channel: flume::Receiver<(u64, u64, u64)>,
 }
 
-impl Source<16> for ClientToServerSource
+impl Source<32> for ClientToServerSource
 {
-    fn poll(&mut self, buffer: &mut [u8; 16]) -> bool
+    fn poll(&mut self, buffer: &mut [u8; 32]) -> bool
     {
         let msg = self.channel.recv();
         match msg
         {
-            Ok((frame, val)) =>
+            Ok((input0, input1, input2)) =>
             {
-                print!("Sending {}", val);
-                *(<&mut [u8; 4]>::try_from(&mut buffer[0..4]).unwrap()) = frame.to_le_bytes();
-                *(<&mut [u8; 8]>::try_from(&mut buffer[4..12]).unwrap()) = u64::from(val).to_le_bytes();
+                print!("Sending {}, {}, {}", input0, input1, input2);
+                *(<&mut [u8; 8]>::try_from(&mut buffer[0..8]).unwrap()) = input0.to_le_bytes();
+                *(<&mut [u8; 8]>::try_from(&mut buffer[8..16]).unwrap()) = input1.to_le_bytes();
+                *(<&mut [u8; 8]>::try_from(&mut buffer[16..24]).unwrap()) = input2.to_le_bytes();
                 true
             }
             _ => false,
@@ -59,10 +60,11 @@ impl Sink<32> for ServerToClientSink
 {
     fn handle(&mut self, buffer: &[u8; 32])
     {
-        let frame = u32::from_le_bytes(*(<&[u8; 4]>::try_from(&buffer[0..4]).unwrap()));
-        let player_id = u8::from_le_bytes(*(<&[u8; 1]>::try_from(&buffer[4..5]).unwrap()));
-        let player_input = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[5..13]).unwrap()));
-        self.channel.send((frame, player_id, player_input)).unwrap();
+        let input0 = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[0..8]).unwrap()));
+        let input1 = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[8..16]).unwrap()));
+        let input2 = u64::from_le_bytes(*(<&[u8; 8]>::try_from(&buffer[16..24]).unwrap()));
+        let player_id = u8::from_le_bytes(*(<&[u8; 1]>::try_from(&buffer[24..25]).unwrap()));
+        self.channel.send((input0, input1, input2, player_id)).unwrap();
     }
 }
 
@@ -157,7 +159,7 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
                 channel: receiver_channel.0,
             },
         )?
-        .sender::<_, 16, 3>(
+        .sender::<_, 32, 3>(
             &client_to_server_schema,
             ClientToServerSource {
                 channel: sender_channel.1,
@@ -177,11 +179,11 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
 
             match incoming
             {
-                Ok((frame, player_id, player_input)) =>
+                Ok((input0, input1, input2, player_id)) =>
                 {
                     println!(
-                        "Recv'd Frame({}) PlayerID({}) PlayerInput({})",
-                        frame, player_id, player_input
+                        "Recv'd Input0({}) Input1({}) Input2({}) PlayerID({})",
+                        input0, input1, input2, player_id
                     );
                 }
                 Err(e) =>
@@ -193,7 +195,6 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
         }
     });
 
-    let mut frame: u32 = 0;
     loop
     {
         if cancellation_token.is_cancelled()
@@ -201,13 +202,13 @@ async fn run_client_from_config(config: LongboyClientConfig) -> anyhow::Result<(
             break;
         }
         // send keys
-        sleep(Duration::from_millis(100)).await;
-        // random ascii between 32 and 126
-        let player_input: u64 = rand::random::<u8>() as u64 % (126 - 32) + 32;
-        println!("Sending Frame({}) PlayerInput({})", frame, player_input);
-        sender_channel.0.send((frame, player_input)).unwrap();
-        frame += 1;
-        println!("Frame {}", frame);
+        sleep(Duration::from_millis(5000)).await;
+        // random inputs for testing
+        let input0 = rand::random::<u64>();
+        let input1 = rand::random::<u64>();
+        let input2 = rand::random::<u64>();
+        println!("Sending Input0({}) Input1({}) Input2({})", input0, input1, input2);
+        sender_channel.0.send((input0, input1, input2)).unwrap();
     }
 
     Ok(())

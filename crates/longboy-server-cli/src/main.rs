@@ -94,7 +94,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     let client_to_server_schema = new_client_to_server_schema();
 
     let server_builder = Server::builder(config.session_capacity, server_runtime)
-        .sender::<_, 32, 3>(&server_to_client_schema, server_broker)
+        .sender::<_, 28, 3>(&server_to_client_schema, server_broker)
         .unwrap()
         .receiver::<_, 28, 1>(&client_to_server_schema, client_broker)
         .unwrap();

@@ -23,6 +23,27 @@
             "externalConsole": true
         },
         {
+            "name": "(Windows) Launch longboy-client-cli",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/longboy-client-cli.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "short"
+                },
+                {
+                    "name": "RUSTC_TOOLCHAIN",
+                    "value": "~/.rustup/toolchains/nightly-aarch64-apple-darwin"
+                }
+            ],
+            "externalConsole": true
+        },
+        {
             "type": "cppdbg",
             "request": "launch",
             "name": "Launch longboy-client-cli",

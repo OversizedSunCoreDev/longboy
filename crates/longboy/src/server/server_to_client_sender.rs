@@ -5,6 +5,7 @@ use enum_map::EnumMap;
 use flume::Receiver as FlumeReceiver;
 use fnv::FnvHashMap;
 use thunderdome::{Arena, Index};
+use tracing::trace;
 
 use crate::{Constants, Factory, Mirroring, RuntimeTask, Sender, ServerSessionEvent, Source, UdpSocketExt};
 
@@ -99,8 +100,7 @@ where
         })
     }
 
-    #[tracing::instrument(skip(self))]
-    fn poll_server_session_events(&mut self, timestamp: u16)
+    fn poll_server_session_events(&mut self, _timestamp: u16)
     {
         for event in self.session_receiver.try_iter()
         {
@@ -128,7 +128,6 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self))]
     fn poll_for_client_socket_addresses(&mut self)
     {
         // Update Client socket addresses.
@@ -144,12 +143,12 @@ where
 
             if let Some(index) = self.session_id_to_session_map.get(&session_id)
             {
+                trace!("Received mapping from session {} to socket address {}", session_id, socket_addr);
                 self.sessions[*index].socket_addr = Some(socket_addr);
             }
         }
     }
 
-    #[tracing::instrument(skip(self))]
     fn poll_sessions(&mut self, timestamp: u16)
     {
         // Poll Sessions
