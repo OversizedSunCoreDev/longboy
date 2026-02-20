@@ -20,6 +20,9 @@ impl ClientSession
         let cipher_key = receive.read_u64_le().await?;
         receive.stop(Default::default())?;
 
+        // debug print the session id and cipher key
+        println!("Received session id: {}, cipher key: {}", session_id, cipher_key);
+
         Ok(Self {
             connection,
             session_id,

@@ -5,6 +5,7 @@ use enum_map::{Enum, EnumMap};
 use flume::Receiver as FlumeReceiver;
 use fnv::FnvHashMap;
 use thunderdome::{Arena, Index};
+use tracing::{info, warn};
 
 use crate::{Constants, Factory, Mirroring, Receiver, RuntimeTask, ServerSessionEvent, Sink};
 
@@ -35,6 +36,33 @@ where
 {
     socket_addrs: EnumMap<Mirroring, Option<SocketAddr>>,
     receiver: Receiver<SinkType, SIZE, WINDOW_SIZE>,
+}
+
+impl<SinkFactoryType, const SIZE: usize, const WINDOW_SIZE: usize> std::fmt::Debug
+    for ClientToServerReceiver<SinkFactoryType, SIZE, WINDOW_SIZE>
+where
+    SinkFactoryType: Factory<Type: Sink<SIZE>>,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::DATAGRAM_SIZE]:,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::MAX_BUFFERED]:,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        f.debug_struct("ClientToServerReceiver")
+            .field("name", &self.name)
+            .field("mapper_socket", &self.mapper_socket)
+            .field("socket", &self.socket)
+            .field("session_receiver", &"FlumeReceiver<ServerSessionEvent>")
+            .field(
+                "sessions",
+                &format!(
+                    "Arena<ReceiverSession<{}, {}, {}>>",
+                    "SinkFactoryType::Type", SIZE, WINDOW_SIZE
+                ),
+            )
+            .field("session_id_to_session_map", &self.session_id_to_session_map)
+            .field("socket_addr_to_session_map", &self.socket_addr_to_session_map)
+            .finish()
+    }
 }
 
 impl<SinkFactoryType, const SIZE: usize, const WINDOW_SIZE: usize>
@@ -74,26 +102,9 @@ where
             sink_factory,
         })
     }
-}
 
-impl<SinkFactoryType, const SIZE: usize, const WINDOW_SIZE: usize> RuntimeTask
-    for ClientToServerReceiver<SinkFactoryType, SIZE, WINDOW_SIZE>
-where
-    SinkFactoryType: Factory<Type: Sink<SIZE>>,
-    [(); <Constants<SIZE, WINDOW_SIZE>>::DATAGRAM_SIZE]:,
-    [(); <Constants<SIZE, WINDOW_SIZE>>::MAX_BUFFERED]:,
-{
-    fn name(&self) -> &str
+    fn poll_server_session_events(&mut self, _timestamp: u16)
     {
-        &self.name
-    }
-
-    fn poll(&mut self, timestamp: u16)
-    {
-        // Alias constants so they're less painful to read.
-        #[allow(non_snake_case)]
-        let DATAGRAM_SIZE: usize = Constants::<SIZE, WINDOW_SIZE>::DATAGRAM_SIZE;
-
         // Handle Session changes.
         for event in self.session_receiver.try_iter()
         {
@@ -123,19 +134,32 @@ where
                 }
             }
         }
+    }
 
+    fn poll_for_client_socket_addresses(&mut self)
+    {
         // Update Client socket addresses.
         let mut buffer = [0; 64];
+        // TODO: This accepts anything, even those which are not mapped, no session is established, and there is no signed header.
         while let Ok((len, socket_addr)) = self.mapper_socket.recv_from(&mut buffer)
         {
-            if len != std::mem::size_of::<u64>() + std::mem::size_of::<u8>()
+            if len < std::mem::size_of::<u64>() + std::mem::size_of::<u8>()
+            // disqualify not enough data?
             {
+                warn!(
+                    "Received mapping of invalid length {} from socket_addr {:?}",
+                    len, socket_addr
+                );
                 continue;
             }
 
             let session_id = u64::from_le_bytes(*<&[u8; 8]>::try_from(&buffer[0..8]).unwrap());
-
+            info!(
+                "Received mapping from session_id {} to socket_addr {:?}",
+                session_id, socket_addr
+            );
             let mirroring = buffer[8] as usize;
+
             if mirroring >= Mirroring::LENGTH
             {
                 continue;
@@ -148,23 +172,46 @@ where
 
                 if let Some(socket_addr) = session.socket_addrs[mirroring]
                 {
+                    info!(
+                        "Removing old mapping from session_id {} to socket_addr {:?} for mirroring {:?}",
+                        session_id, socket_addr, mirroring
+                    );
                     self.socket_addr_to_session_map.remove(&socket_addr);
                 }
 
+                info!(
+                    "Adding mapping from session_id {} to socket_addr {:?} for mirroring {:?}",
+                    session_id, socket_addr, mirroring
+                );
                 session.socket_addrs[mirroring] = Some(socket_addr);
                 self.socket_addr_to_session_map.insert(socket_addr, *index);
             }
         }
+    }
 
-        // Process datagrams.
+    fn poll_for_client_datagrams(&mut self, timestamp: u16)
+    {
+        // Alias constants so they're less painful to read.
+        #[allow(non_snake_case)]
+        let DATAGRAM_SIZE: usize = Constants::<SIZE, WINDOW_SIZE>::DATAGRAM_SIZE;
+
+        // TODO: This accepts anything, even those which are not mapped, no session is established, and there is no signed header.
         let mut buffer = [0; 512];
         while let Ok((len, socket_addr)) = self.socket.recv_from(&mut buffer)
         {
             if len != DATAGRAM_SIZE
             {
+                warn!(
+                    "Received datagram of invalid length {} from socket_addr {:?}",
+                    len, socket_addr
+                );
                 continue;
             }
             let datagram = (&mut buffer[0..DATAGRAM_SIZE]).try_into().unwrap();
+            info!(
+                "Received datagram from socket_addr {:?} - datagram {:?}",
+                socket_addr, datagram
+            );
 
             if let Some(index) = self.socket_addr_to_session_map.get(&socket_addr)
             {
@@ -175,5 +222,25 @@ where
                     .handle_datagram(timestamp, datagram);
             }
         }
+    }
+}
+
+impl<SinkFactoryType, const SIZE: usize, const WINDOW_SIZE: usize> RuntimeTask
+    for ClientToServerReceiver<SinkFactoryType, SIZE, WINDOW_SIZE>
+where
+    SinkFactoryType: Factory<Type: Sink<SIZE>>,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::DATAGRAM_SIZE]:,
+    [(); <Constants<SIZE, WINDOW_SIZE>>::MAX_BUFFERED]:,
+{
+    fn name(&self) -> &str
+    {
+        &self.name
+    }
+
+    fn poll(&mut self, timestamp: u16)
+    {
+        self.poll_server_session_events(timestamp);
+        self.poll_for_client_socket_addresses();
+        self.poll_for_client_datagrams(timestamp);
     }
 }
