@@ -13,10 +13,10 @@ use rustls::{
     crypto::{CryptoProvider, aws_lc_rs},
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject},
 };
-use tracing::{error, info, warn};
-use tracing_subscriber::fmt::format::FmtSpan;
 use std::{net::SocketAddr, sync::Arc};
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
+use tracing_subscriber::fmt::format::FmtSpan;
 
 use crate::broker::{ClientBroker, ServerBroker, SessionBroker};
 
@@ -86,8 +86,8 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     };
 
     let broker = std::sync::Arc::new(SessionBroker::<32>::new());
-    let client_broker = ClientBroker::new(broker.clone().into());
-    let server_broker = ServerBroker::new(broker.clone().into());
+    let client_broker = ClientBroker::new(broker.clone());
+    let server_broker = ServerBroker::new(broker.clone());
 
     // Setup the receivers for client-server communication.
     let server_to_client_schema = new_server_to_client_schema();

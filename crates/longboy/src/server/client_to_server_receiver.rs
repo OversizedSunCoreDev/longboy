@@ -143,7 +143,8 @@ where
         // TODO: This accepts anything, even those which are not mapped, no session is established, and there is no signed header.
         while let Ok((len, socket_addr)) = self.mapper_socket.recv_from(&mut buffer)
         {
-            if len < std::mem::size_of::<u64>() + std::mem::size_of::<u8>() // disqualify not enough data?
+            if len < std::mem::size_of::<u64>() + std::mem::size_of::<u8>()
+            // disqualify not enough data?
             {
                 warn!(
                     "Received mapping of invalid length {} from socket_addr {:?}",
@@ -171,11 +172,17 @@ where
 
                 if let Some(socket_addr) = session.socket_addrs[mirroring]
                 {
-                    info!("Removing old mapping from session_id {} to socket_addr {:?} for mirroring {:?}", session_id, socket_addr, mirroring);
+                    info!(
+                        "Removing old mapping from session_id {} to socket_addr {:?} for mirroring {:?}",
+                        session_id, socket_addr, mirroring
+                    );
                     self.socket_addr_to_session_map.remove(&socket_addr);
                 }
 
-                info!("Adding mapping from session_id {} to socket_addr {:?} for mirroring {:?}", session_id, socket_addr, mirroring);
+                info!(
+                    "Adding mapping from session_id {} to socket_addr {:?} for mirroring {:?}",
+                    session_id, socket_addr, mirroring
+                );
                 session.socket_addrs[mirroring] = Some(socket_addr);
                 self.socket_addr_to_session_map.insert(socket_addr, *index);
             }
@@ -201,7 +208,10 @@ where
                 continue;
             }
             let datagram = (&mut buffer[0..DATAGRAM_SIZE]).try_into().unwrap();
-            info!("Received datagram from socket_addr {:?} - datagram {:?}", socket_addr, datagram);
+            info!(
+                "Received datagram from socket_addr {:?} - datagram {:?}",
+                socket_addr, datagram
+            );
 
             if let Some(index) = self.socket_addr_to_session_map.get(&socket_addr)
             {

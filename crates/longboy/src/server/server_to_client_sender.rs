@@ -143,7 +143,10 @@ where
 
             if let Some(index) = self.session_id_to_session_map.get(&session_id)
             {
-                trace!("Received mapping from session {} to socket address {}", session_id, socket_addr);
+                trace!(
+                    "Received mapping from session {} to socket address {}",
+                    session_id, socket_addr
+                );
                 self.sessions[*index].socket_addr = Some(socket_addr);
             }
         }

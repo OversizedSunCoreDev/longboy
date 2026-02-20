@@ -1,7 +1,6 @@
 use anyhow::Result;
 use flume::{Receiver, Sender};
 use longboy::{Factory, Sink, Source};
-use tracing::info;
 use std::{
     collections::HashMap,
     sync::{
@@ -9,6 +8,7 @@ use std::{
         atomic::{AtomicU64, Ordering::SeqCst},
     },
 };
+use tracing::info;
 
 pub struct SessionBroker<const MAX_PLAYERS: usize>
 {
