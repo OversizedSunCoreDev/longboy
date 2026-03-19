@@ -145,9 +145,11 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     let listen_addr = config.listen_address.unwrap_or_else(|| "[::1]:4433".parse().unwrap());
 
     // Now use Quinn (HTTP/3 (QUIP)) to start a listening endpoint.
-    let server_crypto = rustls::ServerConfig::builder()
+    let mut server_crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()
-        .with_single_cert(cert_chain, key)?;
+        .with_single_cert(cert_chain, key)
+        .context("failed to build server crypto configuration")?;
+    server_crypto.alpn_protocols = vec![b"longboyquic".to_vec()];
     let server_config = quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
     let server_endpoint = Endpoint::server(server_config, listen_addr).context("failed to build endpoint")?;
 
