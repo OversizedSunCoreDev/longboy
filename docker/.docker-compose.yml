@@ -1,0 +1,41 @@
+services:
+  server:
+    container_name: longboy_server
+    build:
+      context: ..
+      dockerfile: docker/server.dockerfile
+    environment:
+      - LONGBOY_SERVER_RUNTIME_TYPE=Tokio
+      - LONGBOY_SERVER_SESSION_CAPACITY=1000
+      - LONGBOY_SERVER_PUBLIC_CERTIFICATE_PATH=./localhost.crt
+      - LONGBOY_SERVER_PRIVATE_KEY_PATH=./localhost.key
+      - LONGBOY_SERVER_LISTEN_ADDRESS=0.0.0.0:4433
+    networks:
+      longboy-network:
+        ipv4_address: 192.168.1.10
+
+  client:
+    build:
+      context: ..
+      dockerfile: docker/client.dockerfile
+    environment:
+      - LONGBOY_CLIENT_CERTIFICATE_TRUST_STORE=./rootCA.pem
+      - LONGBOY_CLIENT_SERVER_ADDRESS=192.168.1.10:4433
+      - LONGBOY_CLIENT_SERVER_NAME=localhost
+    networks:
+      - longboy-network
+    depends_on:
+      - server
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+    deploy:
+      replicas: 16
+
+networks:
+  longboy-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "192.168.1.0/24"
+          gateway: "192.168.1.1"
