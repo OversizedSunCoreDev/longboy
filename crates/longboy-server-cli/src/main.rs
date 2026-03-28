@@ -9,11 +9,12 @@ use config::Config;
 use longboy::{Server, ServerSession, ThreadRuntime, TokioRuntime};
 use longboy_schema::{new_client_to_server_schema, new_server_to_client_schema};
 use quinn::{Connection, Endpoint, crypto::rustls::QuicServerConfig};
+use rand_unique::RandomSequence;
 use rustls::{
     crypto::{CryptoProvider, aws_lc_rs},
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject},
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::{Arc, Mutex}};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -94,7 +95,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     let client_to_server_schema = new_client_to_server_schema();
 
     let server_builder = Server::builder(config.session_capacity, server_runtime)
-        .sender::<_, 28, 3>(&server_to_client_schema, server_broker)
+        .sender::<_, 28, 1>(&server_to_client_schema, server_broker)
         .unwrap()
         .receiver::<_, 28, 1>(&client_to_server_schema, client_broker)
         .unwrap();
@@ -156,6 +157,9 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     // create a new logical server instance
     let mut server_instance = server_builder.build();
 
+    // weak key generator for session encryption. This is not ideal but it is important that the server can generate keys for sessions without blocking on a mutex or something. We can replace this with a more robust solution later if needed.
+    let mut keygenerator = Arc::new(Mutex::new(RandomSequence::<u64>::rand(&mut rand::rngs::ThreadRng::default())));
+
     // log out some info on server startup
     info!("Longboy server listening on {}", listen_addr);
     // print stats from server endpoint
@@ -187,7 +191,7 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
                     Ok(connection) =>
                     {
                         // handle the connection
-                        if let Err(e) = server_handle_connection(connection, &mut server_instance, &broker).await
+                        if let Err(e) = server_handle_connection(connection, &mut server_instance, &broker, &mut keygenerator).await
                         {
                             warn!("Error handling connection: {:?}", e);
                         }
@@ -204,6 +208,7 @@ async fn server_handle_connection(
     conn: Connection,
     server: &mut Server,
     broker: &std::sync::Arc<SessionBroker<32>>,
+    keygenerator: &std::sync::Arc<std::sync::Mutex<RandomSequence<u64>>>,
 ) -> Result<()>
 {
     let remote_address = conn.remote_address();
@@ -211,7 +216,7 @@ async fn server_handle_connection(
 
     let player_index = broker.next_player_index()?;
     let session_id = broker.allocate_session_id(player_index);
-    let cipher_key = 0xdeadbeef;
+    let cipher_key = keygenerator.lock().unwrap().next().expect("key generator should never exhaust");
     let server_session = ServerSession::new(session_id, cipher_key, conn).await?;
     server.register(server_session); // Perhaps this should handle errors in some way? Client ditches mid stream?
     Ok(())
