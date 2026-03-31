@@ -55,6 +55,9 @@ where
         #[allow(non_snake_case)]
         let MAX_BUFFERED: usize = Constants::<SIZE, WINDOW_SIZE>::MAX_BUFFERED;
 
+        tracing::trace!("Handling datagram with timestamp {timestamp} at local cycle {}", self.cycle);
+        tracing::trace!("Flags: {:?}", self.flags);
+
         // Grab cycle and timestamp.
         self.cipher
             .decrypt_header(<&mut [u8; 4]>::try_from(&mut datagram[0..4]).unwrap());
@@ -63,8 +66,17 @@ where
 
         // Calculate diff for cycle and timestamp.
         let cycle_diff = ((datagram_cycle + MAX_CYCLE) - self.cycle) % MAX_CYCLE;
-        let timestamp_diff =
-            (((datagram_timestamp as u32 + u16::MAX as u32) - timestamp as u32) % (u16::MAX as u32)) as u16;
+        let timestamp_diff = timestamp.wrapping_sub(datagram_timestamp);
+
+        // trace cycle and timestamp info.
+        tracing::trace!(
+            datagram_cycle,
+            datagram_timestamp,
+            cycle_diff,
+            timestamp_diff,
+            local_cycle = self.cycle,
+            local_timestamp = timestamp
+        );
 
         // Check for bad datagrams or late datagrams that are already processed.  Because
         // we ensure only a positive diff, this is done by checking for any values greater
@@ -72,6 +84,7 @@ where
         if cycle_diff > 256 || timestamp_diff > 2048
         {
             // Bad datagram or already received.
+            tracing::warn!("Dropping datagram with cycle diff {cycle_diff} and timestamp diff {timestamp_diff}");
             return;
         }
 
@@ -80,10 +93,12 @@ where
         if cycle_diff > std::cmp::min(8, WINDOW_SIZE + 1)
         {
             // soft warning
+            tracing::warn!("Late datagram with cycle diff {cycle_diff} and timestamp diff {timestamp_diff}");
         }
         if cycle_diff > MAX_BUFFERED
         {
             // hard warning
+            tracing::error!("Datagram with cycle diff {cycle_diff} and timestamp diff {timestamp_diff} is too far ahead");
 
             for _ in 0..(cycle_diff - MAX_BUFFERED)
             {
@@ -103,6 +118,7 @@ where
             // already adanced the local cycle to catch up, if applicable.
             if ((cycle_i + MAX_CYCLE) - self.cycle) % MAX_CYCLE > MAX_BUFFERED
             {
+                tracing::trace!("Stopping sink input at cycle {} because it's too far ahead of local cycle {}", cycle_i, self.cycle);
                 break;
             }
 
@@ -127,13 +143,16 @@ where
         // Advance cycles.
         loop
         {
+            tracing::trace!("Advancing cycle from {}", self.cycle);
             let index = self.cycle % MAX_BUFFERED;
             if !self.flags[index]
             {
+                tracing::trace!("Stopping cycle advance at cycle {} because flag is not set", self.cycle);
                 break;
             }
             self.flags[index] = false;
             self.cycle = (self.cycle + 1) % MAX_CYCLE;
+            tracing::trace!("Advanced cycle to {}", self.cycle);
         }
     }
 }
