@@ -23,6 +23,7 @@ rc5 = { git = "https://github.com/RustCrypto/block-ciphers.git", rev = "36b34efd
 thunderdome = "0.6.1"
 tokio = { version = "1.48", features = ["full"] }
 tokio-util = "0.7.11"
+tracing = "0.1.44"
 
 [dev-dependencies]
 parking_lot = "0.12.3"

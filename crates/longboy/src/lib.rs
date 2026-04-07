@@ -2,7 +2,6 @@
 #![feature(generic_const_exprs)]
 #![feature(generic_const_items)]
 #![feature(map_try_insert)]
-#![feature(try_blocks)]
 
 // API
 mod client;
