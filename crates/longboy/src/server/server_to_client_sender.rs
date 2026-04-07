@@ -162,7 +162,10 @@ where
             {
                 for socket in self.sockets.values()
                 {
-                    trace!("Sending datagram to socket address {} via socket {:?}", socket_addr, socket);
+                    trace!(
+                        "Sending datagram to socket address {} via socket {:?}",
+                        socket_addr, socket
+                    );
                     socket.send_to(datagram, socket_addr).expect("send_to failure");
                 }
             }

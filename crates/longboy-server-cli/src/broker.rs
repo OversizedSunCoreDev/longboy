@@ -39,7 +39,7 @@ impl<const MAX_PLAYERS: usize> SessionBroker<MAX_PLAYERS>
             broadcast_channel,
             next_session_id: AtomicU64::new(1),
             player_sessions: Arc::new(RwLock::new(HashMap::new())),
-            player_index_free_list: Arc::new(RwLock::new((0..MAX_PLAYERS).map(|_| true).collect()))
+            player_index_free_list: Arc::new(RwLock::new((0..MAX_PLAYERS).map(|_| true).collect())),
         }
     }
 

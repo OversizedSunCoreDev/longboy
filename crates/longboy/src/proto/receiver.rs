@@ -55,7 +55,10 @@ where
         #[allow(non_snake_case)]
         let MAX_BUFFERED: usize = Constants::<SIZE, WINDOW_SIZE>::MAX_BUFFERED;
 
-        tracing::trace!("Handling datagram with timestamp {timestamp} at local cycle {}", self.cycle);
+        tracing::trace!(
+            "Handling datagram with timestamp {timestamp} at local cycle {}",
+            self.cycle
+        );
         tracing::trace!("Flags: {:?}", self.flags);
 
         // Grab cycle and timestamp.
@@ -98,7 +101,9 @@ where
         if cycle_diff > MAX_BUFFERED
         {
             // hard warning
-            tracing::error!("Datagram with cycle diff {cycle_diff} and timestamp diff {timestamp_diff} is too far ahead");
+            tracing::error!(
+                "Datagram with cycle diff {cycle_diff} and timestamp diff {timestamp_diff} is too far ahead"
+            );
 
             for _ in 0..(cycle_diff - MAX_BUFFERED)
             {
@@ -118,7 +123,11 @@ where
             // already adanced the local cycle to catch up, if applicable.
             if ((cycle_i + MAX_CYCLE) - self.cycle) % MAX_CYCLE > MAX_BUFFERED
             {
-                tracing::trace!("Stopping sink input at cycle {} because it's too far ahead of local cycle {}", cycle_i, self.cycle);
+                tracing::trace!(
+                    "Stopping sink input at cycle {} because it's too far ahead of local cycle {}",
+                    cycle_i,
+                    self.cycle
+                );
                 break;
             }
 

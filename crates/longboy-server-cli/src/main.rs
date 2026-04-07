@@ -14,7 +14,10 @@ use rustls::{
     crypto::{CryptoProvider, aws_lc_rs},
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject},
 };
-use std::{net::SocketAddr, sync::{Arc, Mutex}};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -158,7 +161,9 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
     let mut server_instance = server_builder.build();
 
     // weak key generator for session encryption. This is not ideal but it is important that the server can generate keys for sessions without blocking on a mutex or something. We can replace this with a more robust solution later if needed.
-    let mut keygenerator = Arc::new(Mutex::new(RandomSequence::<u64>::rand(&mut rand::rngs::ThreadRng::default())));
+    let keygenerator = Arc::new(Mutex::new(RandomSequence::<u64>::rand(
+        &mut rand::rngs::ThreadRng::default(),
+    )));
 
     // log out some info on server startup
     info!("Longboy server listening on {}", listen_addr);
@@ -191,7 +196,8 @@ async fn run_server_from_config(config: LongboyServerConfig, cancellation_token:
                     Ok(connection) =>
                     {
                         // handle the connection
-                        if let Err(e) = server_handle_connection(connection, &mut server_instance, &broker, &mut keygenerator).await
+                        if let Err(e) =
+                            server_handle_connection(connection, &mut server_instance, &broker, &keygenerator).await
                         {
                             warn!("Error handling connection: {:?}", e);
                         }
@@ -216,7 +222,11 @@ async fn server_handle_connection(
 
     let player_index = broker.next_player_index()?;
     let session_id = broker.allocate_session_id(player_index);
-    let cipher_key = keygenerator.lock().unwrap().next().expect("key generator should never exhaust");
+    let cipher_key = keygenerator
+        .lock()
+        .unwrap()
+        .next()
+        .expect("key generator should never exhaust");
     let server_session = ServerSession::new(session_id, cipher_key, conn).await?;
     server.register(server_session); // Perhaps this should handle errors in some way? Client ditches mid stream?
     Ok(())
